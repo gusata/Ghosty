@@ -44,6 +44,8 @@ mod quick_chat_hotkey;
 mod credentials;
 mod github;
 mod vercel;
+mod weather;
+mod google_workspace;
 mod tray;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -910,13 +912,14 @@ fn show_utility_popup(
     window: WebviewWindow,
     position_x: Option<i32>,
     position_y: Option<i32>,
+    dashboard: Option<bool>,
 ) -> Result<(), String> {
-    place_utility_popup(&app, &window, position_x.zip(position_y), false)
+    place_utility_popup(&app, &window, position_x.zip(position_y), false, dashboard.unwrap_or(false))
 }
 
 #[tauri::command]
 fn show_quick_chat(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    place_utility_popup(&app, &window, None, true)
+    place_utility_popup(&app, &window, None, true, false)
 }
 
 #[tauri::command]
@@ -956,6 +959,7 @@ fn place_utility_popup(
     window: &WebviewWindow,
     saved_position: Option<(i32, i32)>,
     quick_chat: bool,
+    dashboard: bool,
 ) -> Result<(), String> {
     let fallback_monitor = window
         .current_monitor()
@@ -984,11 +988,15 @@ fn place_utility_popup(
     let scale = monitor.scale_factor();
     let logical_width = if quick_chat {
         (f64::from(monitor_size.width) / scale - 32.0).clamp(320.0, 560.0)
+    } else if dashboard {
+        (f64::from(monitor_size.width) / scale - 48.0).clamp(420.0, 760.0)
     } else {
         (f64::from(monitor_size.width) / scale - 32.0).clamp(240.0, 400.0)
     };
     let logical_height = if quick_chat {
         (f64::from(monitor_size.height) / scale - 104.0).clamp(260.0, 472.0)
+    } else if dashboard {
+        (f64::from(monitor_size.height) / scale - 40.0).clamp(480.0, 760.0)
     } else {
         (f64::from(monitor_size.height) / scale - 32.0).clamp(300.0, 500.0)
     };
@@ -1148,6 +1156,7 @@ pub fn run() {
         .manage(codex_chat::CodexChatState::default())
         .manage(github::GithubCache::default())
         .manage(vercel::VercelCache::default())
+        .manage(google_workspace::GoogleWorkspaceState::default())
         .manage(tray::AppPauseState::default())
         .setup(|app| {
             tray::install(app.handle()).map_err(std::io::Error::other)?;
@@ -1195,6 +1204,18 @@ pub fn run() {
             vercel::vercel_clear_token,
             vercel::vercel_cached_snapshot,
             vercel::vercel_refresh,
+            weather::weather_search_locations,
+            weather::weather_get_forecast,
+            google_workspace::google_auth_begin,
+            google_workspace::google_auth_poll,
+            google_workspace::google_auth_cancel,
+            google_workspace::google_account_status,
+            google_workspace::google_cached_snapshot,
+            google_workspace::google_refresh,
+            google_workspace::google_mark_message,
+            google_workspace::google_complete_task,
+            google_workspace::google_add_task,
+            google_workspace::google_clear_account,
             list_displays,
             set_island_rect,
             apply_display_layout,

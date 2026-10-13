@@ -1,6 +1,6 @@
 import "./style.css";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check as checkAppUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -29,11 +29,45 @@ type MediaInfo = {
 };
 type AudioAppVolume = { processId: number; name: string; volume: number };
 type Edge = "left" | "right" | "top" | "bottom";
-type MenuTab = "home" | "pet";
-type SettingsTab = "general" | "shortcuts";
+type MenuTab = "home" | "pet" | "panels";
+type SettingsTab = "general" | "shortcuts" | "panels";
 type InteractionMode = "hover" | "click";
 type HomeView = "now" | "activity" | "github" | "vercel" | "media";
-type UtilityPopupMode = "focus" | "focus-summary" | "codex-activity" | "pocket" | "customize" | "clipboard" | "chat";
+type UtilityPopupMode = "focus" | "focus-summary" | "codex-activity" | "pocket" | "customize" | "clipboard" | "dashboard" | "chat";
+type DashboardView = "overview" | "email" | "calendar" | "tasks" | "notifications" | "weather";
+type WeatherLocation = {
+  id: number | null;
+  name: string;
+  admin1: string | null;
+  country: string | null;
+  countryCode: string | null;
+  latitude: number;
+  longitude: number;
+  timezone: string | null;
+};
+type WeatherDay = { date: string; weatherCode: number; minC: number; maxC: number; precipitationProbability: number | null };
+type WeatherSnapshot = {
+  location: WeatherLocation;
+  current: { temperatureC: number; feelsLikeC: number; relativeHumidity: number; weatherCode: number; windSpeedKmh: number; precipitationMm: number; isDay: boolean };
+  days: WeatherDay[];
+  checkedAt: number;
+};
+type GoogleEmailMessage = { id: string; threadId: string; subject: string; sender: string; receivedAt: number; webUrl: string };
+type GoogleCalendarEvent = { id: string; title: string; startsAt: string; endsAt: string | null; allDay: boolean; location: string | null; webUrl: string | null; joinUrl: string | null };
+type GoogleTask = { id: string; listId: string; listTitle: string; title: string; dueAt: string | null };
+type GoogleSnapshot = { email: string; checkedAt: number; unreadCount: number; messages: GoogleEmailMessage[]; events: GoogleCalendarEvent[]; tasks: GoogleTask[] };
+type GoogleAccountStatus = { connected: boolean; email: string | null; configured: boolean };
+type GoogleAuthProgress = { status: "idle" | "waiting" | "connected" | "error"; email: string | null; message: string | null };
+type DashboardNotification = {
+  id: string;
+  kind: "email" | "calendar" | "task" | "weather" | "system";
+  title: string;
+  body: string;
+  occurredAt: number;
+  read: boolean;
+  target?: string;
+};
+type PetReactionSignal = { id: string; state: PetState; detail: string; until: number };
 type UtilityPopupPosition = { x: number; y: number };
 type QuickChatMessage = { id: string; role: "user" | "assistant"; text: string; pending?: boolean };
 type QuickChatApproval = { requestId: number | string; method: string; params: Record<string, unknown>; preview?: string };
@@ -126,6 +160,11 @@ const KEYS = {
   vercelTeamId: "edge-ghosty.vercel-team-id",
   soundsEnabled: "edge-ghosty.sounds-enabled",
   soundVolume: "edge-ghosty.sound-volume",
+  weatherLocation: "edge-ghosty.weather-location",
+  weatherSnapshot: "edge-ghosty.weather-snapshot.v1",
+  dashboardView: "edge-ghosty.dashboard-view",
+  dashboardNotifications: "edge-ghosty.dashboard-notifications.v1",
+  openPanelsRequest: "edge-ghosty.open-panels-request",
 };
 const LEGACY_KEYS = {
   length: "edge-mochi.bar-height",
@@ -157,6 +196,11 @@ const LEGACY_KEYS = {
   vercelTeamId: "edge-mochi.vercel-team-id",
   soundsEnabled: "edge-mochi.sounds-enabled",
   soundVolume: "edge-mochi.sound-volume",
+  weatherLocation: "edge-mochi.weather-location",
+  weatherSnapshot: "edge-mochi.weather-snapshot.v1",
+  dashboardView: "edge-mochi.dashboard-view",
+  dashboardNotifications: "edge-mochi.dashboard-notifications.v1",
+  openPanelsRequest: "edge-mochi.open-panels-request",
 };
 for (const name of Object.keys(KEYS) as Array<keyof typeof KEYS>) {
   const legacyValue = localStorage.getItem(LEGACY_KEYS[name]);
@@ -164,8 +208,10 @@ for (const name of Object.keys(KEYS) as Array<keyof typeof KEYS>) {
     localStorage.setItem(KEYS[name], name === "petName" && legacyValue === "Mochi" ? "Ghosty" : legacyValue);
   }
 }
+localStorage.removeItem("edge-ghosty.google-client-id");
+localStorage.removeItem("edge-mochi.google-client-id");
 if (localStorage.getItem(KEYS.petName) === "Mochi") localStorage.setItem(KEYS.petName, "Ghosty");
-if (!["focus", "focus-summary", "codex-activity", "pocket", "customize", "clipboard", "chat"].includes(localStorage.getItem(KEYS.utilityPopup) ?? "")) {
+if (!["focus", "focus-summary", "codex-activity", "pocket", "customize", "clipboard", "dashboard", "chat"].includes(localStorage.getItem(KEYS.utilityPopup) ?? "")) {
   localStorage.removeItem(KEYS.utilityPopup);
 }
 if (localStorage.getItem(KEYS.onboardingComplete) === null
@@ -306,6 +352,83 @@ function readDisplayIds(): string[] {
   }
 }
 
+function readWeatherLocation(): WeatherLocation | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(KEYS.weatherLocation) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const location = value as Partial<WeatherLocation>;
+    if (typeof location.name !== "string" || !location.name.trim() || location.name.length > 100
+      || typeof location.latitude !== "number" || !Number.isFinite(location.latitude) || Math.abs(location.latitude) > 90
+      || typeof location.longitude !== "number" || !Number.isFinite(location.longitude) || Math.abs(location.longitude) > 180) return null;
+    return {
+      id: typeof location.id === "number" && Number.isSafeInteger(location.id) ? location.id : null,
+      name: location.name.trim(),
+      admin1: typeof location.admin1 === "string" ? location.admin1.slice(0, 100) : null,
+      country: typeof location.country === "string" ? location.country.slice(0, 100) : null,
+      countryCode: typeof location.countryCode === "string" ? location.countryCode.slice(0, 2) : null,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timezone: typeof location.timezone === "string" ? location.timezone.slice(0, 80) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readWeatherSnapshot(): WeatherSnapshot | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(KEYS.weatherSnapshot) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const snapshot = value as Partial<WeatherSnapshot>;
+    const current = snapshot.current;
+    if (!snapshot.location || !current || !Array.isArray(snapshot.days)
+      || typeof snapshot.checkedAt !== "number" || !Number.isFinite(snapshot.checkedAt)
+      || typeof current.temperatureC !== "number" || !Number.isFinite(current.temperatureC)
+      || typeof current.weatherCode !== "number" || !Number.isInteger(current.weatherCode)) return null;
+    const location = readWeatherLocation();
+    if (!location || location.latitude !== snapshot.location.latitude || location.longitude !== snapshot.location.longitude) return null;
+    return snapshot as WeatherSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function readDashboardNotifications(): DashboardNotification[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(KEYS.dashboardNotifications) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is DashboardNotification => {
+      if (!entry || typeof entry !== "object") return false;
+      const item = entry as Partial<DashboardNotification>;
+      return typeof item.id === "string" && item.id.length <= 120
+        && ["email", "calendar", "task", "weather", "system"].includes(item.kind ?? "")
+        && typeof item.title === "string" && item.title.length <= 180
+        && typeof item.body === "string" && item.body.length <= 260
+        && typeof item.occurredAt === "number" && Number.isFinite(item.occurredAt)
+        && typeof item.read === "boolean";
+    }).slice(0, 50).map((entry) => ({
+      ...entry,
+      title: entry.title.trim(),
+      body: entry.body.trim(),
+      target: safeQuickChatWebsiteUrl(entry.target) ?? undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function persistDashboardNotifications() {
+  dashboardNotifications = dashboardNotifications.slice(0, 50);
+  localStorage.setItem(KEYS.dashboardNotifications, JSON.stringify(dashboardNotifications));
+}
+
+function addDashboardNotification(notification: Omit<DashboardNotification, "read">) {
+  if (dashboardNotifications.some((item) => item.id === notification.id)) return false;
+  dashboardNotifications.unshift({ ...notification, read: false });
+  persistDashboardNotifications();
+  return true;
+}
+
 let volume = 62;
 let volumeMixerOpen = false;
 let audioMixerApps: AudioAppVolume[] = [];
@@ -314,11 +437,34 @@ let mediaRefreshBusy = false;
 let mediaUpdatedAt = 0;
 let mediaSeekDragging = false;
 let expanded = onboardingOpen && !onboardingLaunchGreetingActive;
-let settingsTab: SettingsTab = readChoice(KEYS.settingsTab, ["general", "shortcuts"], "general");
+let settingsTab: SettingsTab = readChoice(KEYS.settingsTab, ["general", "shortcuts", "panels"], "general");
 let onboardingInteractionMode: InteractionMode = readChoice(KEYS.interactionMode, ["hover", "click"], "hover");
 let activeTab: MenuTab = "home";
 let activeHomeView: HomeView = "now";
 let utilityPopupMode: UtilityPopupMode | null = null;
+let dashboardView: DashboardView = readChoice(KEYS.dashboardView, ["overview", "email", "calendar", "tasks", "notifications", "weather"], "overview");
+let dashboardNotifications: DashboardNotification[] = readDashboardNotifications();
+let weatherLocation: WeatherLocation | null = readWeatherLocation();
+let weatherSnapshot: WeatherSnapshot | null = readWeatherSnapshot();
+let weatherLoading = false;
+let weatherError = "";
+let weatherSearchBusy = false;
+let weatherSearchMessage = "";
+let weatherSearchResults: WeatherLocation[] = [];
+let weatherQuery = "";
+let weatherSearchOpen = false;
+let googleAccount: GoogleAccountStatus = { connected: false, email: null, configured: false };
+let googleSnapshot: GoogleSnapshot | null = null;
+let googleLoading = false;
+let googleStatusLoading = true;
+let googleStatusMessage = "Verificando conexão com o Google…";
+let googleError = "";
+let googleAuthPending = false;
+let googleAuthPollTimer: number | undefined;
+let googleRefreshInterval: number | undefined;
+let googlePollBusy = false;
+let googleRefreshRequested = false;
+let lastPetReactionId = "";
 let utilityPopupBlurTimer: number | undefined;
 let utilityPopupPositionSaveTimer: number | undefined;
 let latestUtilityPopupPosition: UtilityPopupPosition | null = null;
@@ -411,6 +557,7 @@ let vercelError = "";
 let vercelSnapshot: VercelSnapshot | null = null;
 let vercelTeamId = localStorage.getItem(KEYS.vercelTeamId) ?? "";
 let vercelRefreshInterval: number | undefined;
+let weatherRefreshInterval: number | undefined;
 let soundEnabled = localStorage.getItem(KEYS.soundsEnabled) === "true";
 let soundVolume = readNumber(KEYS.soundVolume, 24, 0, 100);
 let externalLayoutSyncTimer: number | undefined;
@@ -1335,7 +1482,8 @@ function expandedIslandSize() {
     ? horizontal ? 380 : 620
     : activeTab === "home" ? horizontal ? 210 : 480
       : activeTab === "pet" ? horizontal ? 320 : 620
-        : horizontal ? 380 : 620;
+        : activeTab === "panels" ? horizontal ? 380 : 620
+          : horizontal ? 380 : 620;
   return {
     width: Math.min(preferredWidth, Math.max(220, window.innerWidth - (horizontal ? 40 : 32))),
     height: Math.min(preferredHeight, Math.max(180, window.innerHeight - (horizontal ? 32 : 48))),
@@ -1483,13 +1631,14 @@ function makeId() {
   return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-type MenuIconName = "brand" | "home" | "pet" | "shortcuts" | "settings" | "close" | "pocket" | "clipboard" | "search" | "chevron" | "back" | "refresh" | "volume" | "previous" | "play" | "pause" | "next" | "plus" | "file" | "image" | "text";
+type MenuIconName = "brand" | "home" | "pet" | "panels" | "shortcuts" | "settings" | "close" | "pocket" | "clipboard" | "search" | "chevron" | "back" | "refresh" | "volume" | "previous" | "play" | "pause" | "next" | "plus" | "file" | "image" | "text";
 
 function menuIcon(name: MenuIconName) {
   const paths: Record<MenuIconName, string> = {
     brand: '<path d="M12 2.7 13.7 9l6.3 3-6.3 3-1.7 6.3L10.3 15 4 12l6.3-3L12 2.7Z"/><path d="M19 3v4M17 5h4M4 17v4M2 19h4"/>',
     home: '<path d="m3.5 10 8.5-7 8.5 7v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9Z"/><path d="M9 20v-6h6v6"/>',
     pet: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="11" r="1" fill="currentColor" stroke="none"/>',
+    panels: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M15 9v11"/>',
     shortcuts: '<rect x="4" y="4" width="6" height="6" rx="1.4"/><rect x="14" y="4" width="6" height="6" rx="1.4"/><rect x="4" y="14" width="6" height="6" rx="1.4"/><rect x="14" y="14" width="6" height="6" rx="1.4"/>',
     settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
     close: '<path d="m18 6-12 12M6 6l12 12"/>',
@@ -1570,6 +1719,573 @@ function formatMediaTime(ms: number) {
     : `${minutes}:${seconds}`;
 }
 
+function weatherCodeDescription(code: number) {
+  if (code === 0) return "Céu limpo";
+  if (code === 1) return "Predomínio de sol";
+  if (code === 2) return "Parcialmente nublado";
+  if (code === 3) return "Nublado";
+  if (code === 45 || code === 48) return "Neblina";
+  if ([51, 53, 55, 56, 57].includes(code)) return "Garoa";
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "Chuva";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "Neve";
+  if ([95, 96, 99].includes(code)) return "Trovoada";
+  return "Condições variáveis";
+}
+
+function weatherCodeGlyph(code: number) {
+  if (code === 0 || code === 1) return "☀";
+  if (code === 2) return "◒";
+  if (code === 3 || code === 45 || code === 48) return "☁";
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "∿";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "❄";
+  if ([95, 96, 99].includes(code)) return "⚡";
+  return "○";
+}
+
+function weatherPlaceLabel(location: WeatherLocation) {
+  return [location.name, location.admin1, location.country].filter(Boolean).join(", ");
+}
+
+function weatherDayLabel(date: string) {
+  const value = new Date(`${date}T12:00:00`);
+  if (!Number.isFinite(value.getTime())) return date;
+  return new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit" }).format(value).replace(".", "");
+}
+
+function relativeTime(timestamp: number) {
+  const delta = timestamp - Date.now();
+  const minutes = Math.round(delta / 60_000);
+  const formatter = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return formatter.format(hours, "hour");
+  return formatter.format(Math.round(hours / 24), "day");
+}
+
+function refreshDashboardPopupIfOpen() {
+  refreshDashboardIfVisible();
+}
+
+async function searchWeatherLocations(query: string) {
+  weatherQuery = query.trim().slice(0, 100);
+  weatherSearchMessage = "";
+  weatherSearchResults = [];
+  if (weatherQuery.length < 2) {
+    weatherSearchMessage = "Digite pelo menos duas letras.";
+    refreshDashboardPopupIfOpen();
+    return;
+  }
+  weatherSearchBusy = true;
+  signalGhostyReaction("searching", "Procurando sua cidade");
+  refreshDashboardPopupIfOpen();
+  try {
+    weatherSearchResults = await invoke<WeatherLocation[]>("weather_search_locations", { query: weatherQuery });
+    weatherSearchMessage = weatherSearchResults.length ? "Escolha a cidade certa." : "Não encontrei essa cidade. Tente incluir o estado ou o país.";
+  } catch (error) {
+    weatherSearchMessage = `Não consegui buscar a cidade: ${String(error)}`;
+    signalGhostyReaction("error", "A busca de cidades falhou", 2300);
+  } finally {
+    weatherSearchBusy = false;
+    refreshDashboardPopupIfOpen();
+  }
+}
+
+async function selectWeatherLocation(location: WeatherLocation) {
+  weatherSnapshot = null;
+  localStorage.removeItem(KEYS.weatherSnapshot);
+  weatherLocation = location;
+  localStorage.setItem(KEYS.weatherLocation, JSON.stringify(location));
+  weatherSearchOpen = false;
+  weatherSearchResults = [];
+  weatherSearchMessage = "";
+  weatherSnapshot = null;
+  await refreshWeather();
+}
+
+async function refreshWeather() {
+  if (!weatherLocation || weatherLoading || updatesPaused) return;
+  weatherLoading = true;
+  weatherError = "";
+  refreshDashboardPopupIfOpen();
+  try {
+    const next = await invoke<WeatherSnapshot>("weather_get_forecast", { location: weatherLocation });
+    const previous = weatherSnapshot;
+    weatherSnapshot = next;
+    localStorage.setItem(KEYS.weatherSnapshot, JSON.stringify(next));
+    if (previous && previous.current.weatherCode !== next.current.weatherCode) {
+      const description = weatherCodeDescription(next.current.weatherCode);
+      const added = addDashboardNotification({
+        id: `weather-${next.location.latitude.toFixed(2)}-${next.location.longitude.toFixed(2)}-${next.current.weatherCode}-${localCalendarDate(new Date(next.checkedAt))}`,
+        kind: "weather",
+        title: "O tempo mudou",
+        body: `${weatherPlaceLabel(next.location)}: ${description.toLocaleLowerCase("pt-BR")} agora.`,
+        occurredAt: next.checkedAt,
+      });
+      if (added) signalGhostyReaction("question", `O tempo mudou: ${description.toLocaleLowerCase("pt-BR")}`);
+    } else if (!previous) {
+      signalGhostyReaction("thinking", "Conferindo a previsão do tempo", 1500);
+    }
+  } catch (error) {
+    weatherError = String(error);
+    if (!weatherSnapshot) signalGhostyReaction("error", "Não consegui atualizar o clima", 2200);
+  } finally {
+    weatherLoading = false;
+    refreshDashboardPopupIfOpen();
+  }
+}
+
+function googleRandomToken(byteCount = 32) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteCount));
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function startGoogleAuth() {
+  if (googleAuthPollTimer !== undefined) window.clearInterval(googleAuthPollTimer);
+  googleAuthPending = true;
+  googleStatusMessage = "Preparando login seguro no navegador…";
+  googleError = "";
+  refreshGoogleSettingsUi();
+  try {
+    const stateValue = googleRandomToken();
+    const codeVerifier = googleRandomToken(48);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
+    const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    const authorizationUrl = await invoke<string>("google_auth_begin", {
+      stateValue,
+      codeVerifier,
+      codeChallenge,
+    });
+    await invoke("open_targets", { targets: [authorizationUrl] });
+    googleStatusMessage = "Conclua o consentimento na página do Google. O Ghosty está aguardando o retorno.";
+    refreshGoogleSettingsUi();
+    googleAuthPollTimer = window.setInterval(() => { void pollGoogleAuth(); }, 850);
+  } catch (error) {
+    googleAuthPending = false;
+    await invoke("google_auth_cancel").catch(() => undefined);
+    googleStatusMessage = `Não consegui iniciar o login: ${String(error)}`;
+    refreshGoogleSettingsUi();
+  }
+}
+
+async function pollGoogleAuth() {
+  if (!googleAuthPending || googlePollBusy) return;
+  googlePollBusy = true;
+  try {
+    const progress = await invoke<GoogleAuthProgress>("google_auth_poll");
+    if (progress.status === "waiting") return;
+    if (googleAuthPollTimer !== undefined) window.clearInterval(googleAuthPollTimer);
+    googleAuthPollTimer = undefined;
+    googleAuthPending = false;
+    if (progress.status === "connected") {
+      googleAccount = { connected: true, email: progress.email, configured: true };
+      googleStatusMessage = `Google conectado como ${progress.email ?? "sua conta"}.`;
+      googleError = "";
+      refreshGoogleSettingsUi();
+      signalGhostyReaction("finished", "Sua conta Google está conectada", 1600);
+      void refreshGoogleSnapshot();
+    } else if (progress.status === "error") {
+      googleStatusMessage = progress.message ?? "O login não foi concluído.";
+      googleError = googleStatusMessage;
+      refreshGoogleSettingsUi();
+      signalGhostyReaction("error", "O login do Google não foi concluído", 2200);
+    }
+  } catch (error) {
+    googleStatusMessage = `Não consegui verificar o login: ${String(error)}`;
+    googleError = googleStatusMessage;
+    googleAuthPending = false;
+    await invoke("google_auth_cancel").catch(() => undefined);
+    if (googleAuthPollTimer !== undefined) window.clearInterval(googleAuthPollTimer);
+    googleAuthPollTimer = undefined;
+    refreshGoogleSettingsUi();
+  } finally {
+    googlePollBusy = false;
+  }
+}
+
+async function cancelGoogleAuth() {
+  if (googleAuthPollTimer !== undefined) window.clearInterval(googleAuthPollTimer);
+  googleAuthPollTimer = undefined;
+  googleAuthPending = false;
+  await invoke("google_auth_cancel").catch(() => undefined);
+  googleStatusMessage = "Login cancelado. Você pode tentar novamente quando quiser.";
+  refreshGoogleSettingsUi();
+}
+
+function applyGoogleSnapshot(snapshot: GoogleSnapshot | null, processNotifications = false) {
+  const previous = googleSnapshot;
+  googleSnapshot = snapshot;
+  if (snapshot) {
+    googleAccount = { connected: true, email: snapshot.email, configured: googleAccount.configured };
+    googleStatusMessage = `Google conectado como ${snapshot.email}.`;
+    googleError = "";
+    if (processNotifications && currentWindowLabel === "main") {
+      const previousMessageIds = new Set(previous?.messages.map((message) => message.id) ?? []);
+      const newMessages = previous ? snapshot.messages.filter((message) => !previousMessageIds.has(message.id)) : [];
+      let emailNotificationCount = 0;
+      for (const message of newMessages.slice(0, 6)) {
+        const sender = message.sender.split("<")[0].trim().replace(/^"|"$/g, "") || "Novo remetente";
+        const added = addDashboardNotification({
+          id: `google-email-${message.id}`,
+          kind: "email",
+          title: sender.slice(0, 100),
+          body: message.subject || "Nova mensagem não lida",
+          occurredAt: message.receivedAt,
+          target: message.webUrl,
+        });
+        if (added) emailNotificationCount += 1;
+      }
+
+      const now = Date.now();
+      let upcomingEventCount = 0;
+      for (const event of snapshot.events) {
+        if (!event.allDay) {
+          const startsAt = Date.parse(event.startsAt);
+          const delta = startsAt - now;
+          if (Number.isFinite(startsAt) && delta > 0 && delta <= 20 * 60_000) {
+            const added = addDashboardNotification({
+              id: `google-event-${event.id}-${event.startsAt}`,
+              kind: "calendar",
+              title: "Compromisso em breve",
+              body: `${event.title} · ${formatGoogleTime(event.startsAt)}`,
+              occurredAt: now,
+              target: event.joinUrl ?? event.webUrl ?? undefined,
+            });
+            if (added) upcomingEventCount += 1;
+          }
+        }
+      }
+
+      let dueTaskCount = 0;
+      for (const task of snapshot.tasks) {
+        if (!task.dueAt) continue;
+        const dueDay = task.dueAt.slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDay)) continue;
+        const todayDay = localCalendarDate(new Date());
+        if (dueDay > todayDay) continue;
+        const overdue = dueDay < todayDay;
+        const added = addDashboardNotification({
+          id: `google-task-${task.id}-${dueDay}`,
+          kind: "task",
+          title: overdue ? "Tarefa atrasada" : "Tarefa para hoje",
+          body: task.title,
+          occurredAt: now,
+          target: "https://tasks.google.com/",
+        });
+        if (added) dueTaskCount += 1;
+      }
+      const reactionDetails: string[] = [];
+      if (emailNotificationCount) reactionDetails.push(`${emailNotificationCount} ${emailNotificationCount === 1 ? "e-mail novo" : "e-mails novos"}`);
+      if (upcomingEventCount) reactionDetails.push(`${upcomingEventCount} ${upcomingEventCount === 1 ? "compromisso próximo" : "compromissos próximos"}`);
+      if (dueTaskCount) reactionDetails.push(`${dueTaskCount} ${dueTaskCount === 1 ? "tarefa com prazo" : "tarefas com prazo"}`);
+      if (reactionDetails.length) {
+        signalGhostyReaction(upcomingEventCount && !emailNotificationCount && !dueTaskCount ? "thinking" : "question", `O Ghosty encontrou ${reactionDetails.join(" e ")}.`, 2200);
+      }
+    }
+  } else {
+    googleSnapshot = null;
+    googleAccount = { connected: false, email: null, configured: googleAccount.configured };
+    googleStatusMessage = "Google desconectado neste dispositivo.";
+  }
+  refreshDashboardIfVisible();
+  if (currentWindowLabel === "settings-window") refreshGoogleSettingsUi();
+}
+
+async function refreshGoogleSnapshot(forceAfterCurrent = false) {
+  if (!googleAccount.connected || updatesPaused) return;
+  if (googleLoading) {
+    if (forceAfterCurrent) googleRefreshRequested = true;
+    return;
+  }
+  googleLoading = true;
+  googleError = "";
+  refreshDashboardIfVisible();
+  try {
+    const snapshot = await invoke<GoogleSnapshot>("google_refresh");
+    applyGoogleSnapshot(snapshot, true);
+  } catch (error) {
+    reportGoogleError(error, !googleSnapshot);
+  } finally {
+    googleLoading = false;
+    refreshDashboardIfVisible();
+    if (currentWindowLabel === "settings-window") refreshGoogleSettingsUi();
+    if (googleRefreshRequested) {
+      googleRefreshRequested = false;
+      window.setTimeout(() => void refreshGoogleSnapshot(), 0);
+    }
+  }
+}
+
+function reportGoogleError(error: unknown, react = false) {
+  googleError = String(error);
+  googleStatusMessage = googleError;
+  void emit("edge-ghosty-google-error", googleError).catch(() => undefined);
+  if (react) signalGhostyReaction("error", "Não consegui atualizar seus painéis do Google", 2200);
+  refreshDashboardIfVisible();
+  if (currentWindowLabel === "settings-window") refreshGoogleSettingsUi();
+}
+
+async function loadGoogleWorkspace(refresh: boolean) {
+  try {
+    const [account, snapshot] = await Promise.all([
+      invoke<GoogleAccountStatus>("google_account_status"),
+      invoke<GoogleSnapshot | null>("google_cached_snapshot"),
+    ]);
+    googleAccount = account;
+    googleSnapshot = snapshot;
+    googleStatusMessage = account.connected
+      ? `Google conectado como ${account.email ?? "sua conta"}.`
+      : account.configured
+        ? "Conecte sua conta Google para ativar E-mail, Agenda e Tarefas."
+        : "A conexão Google ainda não está disponível nesta versão do Ghosty.";
+    refreshDashboardIfVisible();
+    if (currentWindowLabel === "settings-window") refreshGoogleSettingsUi();
+    if (refresh && account.connected && !updatesPaused) void refreshGoogleSnapshot();
+  } catch (error) {
+    reportGoogleError(`Não consegui consultar a conexão Google: ${String(error)}`);
+  } finally {
+    googleStatusLoading = false;
+    refreshGoogleSettingsUi();
+  }
+}
+
+async function disconnectGoogleWorkspace() {
+  if (!window.confirm(`Remover a conexão Google${googleAccount.email ? ` de ${googleAccount.email}` : ""} deste dispositivo?`)) return;
+  try {
+    await invoke("google_clear_account");
+    applyGoogleSnapshot(null);
+    dashboardNotifications = dashboardNotifications.filter((item) => !["email", "calendar", "task"].includes(item.kind));
+    persistDashboardNotifications();
+    googleStatusMessage = "Token removido deste dispositivo. Para revogar também a autorização da conta, abra a segurança da sua Conta Google.";
+    googleError = "";
+    if (currentWindowLabel === "settings-window") renderSettingsWindow();
+    signalGhostyReaction("finished", "A conexão Google foi removida", 1400);
+  } catch (error) {
+    reportGoogleError(error);
+  }
+}
+
+function formatGoogleTime(value: string, allDay = false) {
+  const date = allDay && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Horário indisponível";
+  return new Intl.DateTimeFormat("pt-BR", allDay
+    ? { weekday: "short", day: "2-digit", month: "short" }
+    : { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date).replace(".", "");
+}
+
+function localCalendarDate(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function formatGoogleDueDate(value: string) {
+  const day = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "Data indisponível";
+  return formatGoogleTime(day, true);
+}
+
+async function runGoogleMessageAction(message: GoogleEmailMessage, action: "read" | "archive") {
+  if (action === "archive" && !window.confirm(`Arquivar “${message.subject}” no Gmail?`)) return;
+  try {
+    await invoke("google_mark_message", { messageId: message.id, action });
+    if (googleSnapshot) {
+      googleSnapshot = {
+        ...googleSnapshot,
+        unreadCount: Math.max(0, googleSnapshot.unreadCount - 1),
+        messages: googleSnapshot.messages.filter((item) => item.id !== message.id),
+      };
+    }
+    const notification = dashboardNotifications.find((item) => item.id === `google-email-${message.id}`);
+    if (notification) markDashboardNotificationRead(notification.id);
+    refreshDashboardIfVisible();
+    await refreshGoogleSnapshot(true);
+    signalGhostyReaction("finished", action === "read" ? "E-mail marcado como lido" : "E-mail arquivado", 1300);
+  } catch (error) {
+    reportGoogleError(error);
+    signalGhostyReaction("error", "Não consegui atualizar esse e-mail", 2100);
+  }
+}
+
+async function completeGoogleTask(task: GoogleTask) {
+  try {
+    await invoke("google_complete_task", { listId: task.listId, taskId: task.id });
+    if (googleSnapshot) googleSnapshot = { ...googleSnapshot, tasks: googleSnapshot.tasks.filter((item) => item.id !== task.id) };
+    const notification = dashboardNotifications.find((item) => item.id.startsWith(`google-task-${task.id}-`));
+    if (notification) markDashboardNotificationRead(notification.id);
+    refreshDashboardIfVisible();
+    signalGhostyReaction("finished", `Tarefa concluída: ${task.title}`, 1900);
+    await refreshGoogleSnapshot(true);
+  } catch (error) {
+    reportGoogleError(error);
+    signalGhostyReaction("error", "Não consegui concluir essa tarefa", 2100);
+  }
+}
+
+async function addGoogleTask(title: string) {
+  try {
+    const created = await invoke<GoogleTask>("google_add_task", { title: title.trim() });
+    if (googleSnapshot) googleSnapshot = { ...googleSnapshot, tasks: [created, ...googleSnapshot.tasks] };
+    refreshDashboardIfVisible();
+    signalGhostyReaction("finished", `Adicionei a tarefa ${title.trim()}`, 1600);
+    await refreshGoogleSnapshot(true);
+    return true;
+  } catch (error) {
+    reportGoogleError(error);
+    signalGhostyReaction("error", "Não consegui adicionar essa tarefa", 2100);
+    return false;
+  }
+}
+
+function dashboardUnreadCount() {
+  return dashboardNotifications.filter((notification) => !notification.read).length;
+}
+
+function dashboardNotificationIcon(kind: DashboardNotification["kind"]) {
+  return kind === "email" ? "@" : kind === "calendar" ? "◷" : kind === "task" ? "✓" : kind === "weather" ? "☁" : "•";
+}
+
+function renderDashboardOverview() {
+  const notificationCount = dashboardUnreadCount();
+  const weatherSummary = weatherSnapshot
+    ? `${Math.round(weatherSnapshot.current.temperatureC)}° · ${weatherCodeDescription(weatherSnapshot.current.weatherCode)}`
+    : weatherLocation ? "Atualizando a previsão" : "Escolha uma cidade";
+  const nextEvent = googleSnapshot?.events.find((event) => event.allDay || Date.parse(event.startsAt) > Date.now());
+  const cards: Array<{ view: DashboardView; title: string; summary: string; glyph: string }> = [
+    { view: "email", title: "E-mail", summary: googleAccount.connected ? `${googleSnapshot?.unreadCount ?? 0} não lidos · ${googleAccount.email}` : "Conectar Gmail", glyph: "@" },
+    { view: "calendar", title: "Agenda", summary: nextEvent ? `${nextEvent.title} · ${formatGoogleTime(nextEvent.startsAt, nextEvent.allDay)}` : googleAccount.connected ? "Sem próximos compromissos" : "Conectar Agenda", glyph: "◷" },
+    { view: "tasks", title: "Tarefas", summary: googleAccount.connected ? `${googleSnapshot?.tasks.length ?? 0} pendentes` : "Conectar Google Tarefas", glyph: "✓" },
+    { view: "weather", title: "Clima", summary: weatherSummary, glyph: weatherSnapshot ? weatherCodeGlyph(weatherSnapshot.current.weatherCode) : "☁" },
+  ];
+  return `
+    <section class="dashboard-overview">
+      <div class="dashboard-welcome"><div class="dashboard-pet">${renderPetCharacter("dashboard-ghosty")}</div><div><span class="section-kicker">SEU DIA, DE RELANCE</span><strong>Oi, ${escapeHtml(petName)} está por aqui.</strong><small>Seus painéis ficam reunidos neste espaço.</small></div></div>
+      <div class="dashboard-overview-grid">${cards.map((card) => `<button class="dashboard-overview-card" data-action="dashboard-view" data-dashboard-view="${card.view}"><span class="dashboard-overview-glyph">${card.glyph}</span><span><strong>${card.title}</strong><small>${escapeHtml(card.summary)}</small></span><span class="dashboard-chevron">›</span></button>`).join("")}</div>
+      <button class="dashboard-notification-summary" data-action="dashboard-view" data-dashboard-view="notifications"><span class="dashboard-overview-glyph">•</span><span><strong>Notificações</strong><small>${notificationCount ? `${notificationCount} novas` : "Tudo em dia por enquanto"}</small></span><span class="dashboard-chevron">›</span></button>
+      ${weatherSnapshot ? `<small class="dashboard-attribution">Dados meteorológicos por Open-Meteo</small>` : ""}
+    </section>`;
+}
+
+function renderDashboardConnectView(title: string, description: string, glyph: string) {
+  return `<section class="dashboard-connect-view"><span class="dashboard-connect-glyph">${glyph}</span><span class="section-kicker">PAINEL DO GHOSTY</span><h2>${title}</h2><p>${googleStatusLoading ? "Verificando o estado da conexão…" : description}</p>${googleError ? `<small class="dashboard-inline-error" role="status">${escapeHtml(googleError)}</small>` : ""}<button class="utility-primary-action" data-action="dashboard-open-settings">${googleStatusLoading ? "Aguarde…" : "Conectar Google"}</button><small>O login abre no navegador. Gmail mostra remetente e assunto; o Ghosty não baixa o corpo das mensagens.</small></section>`;
+}
+
+function renderDashboardGoogleError() {
+  return googleError ? `<small class="dashboard-inline-error" role="status">${escapeHtml(googleError)}</small>` : "";
+}
+
+function renderGooglePanelActions() {
+  return `<div class="dashboard-panel-actions"><small class="google-account-label" title="${escapeHtml(googleAccount.email ?? "")}">${escapeHtml(googleAccount.email ?? "Google")}</small><button class="weather-icon-action" data-action="google-refresh" aria-label="Atualizar painel" title="Atualizar" ${googleLoading || updatesPaused ? "disabled" : ""}>${googleLoading ? "…" : "↻"}</button></div>`;
+}
+
+function renderGoogleEmailPanel() {
+  if (!googleAccount.connected) return renderDashboardConnectView("Gmail", "Conecte a conta Google para ver mensagens não lidas, marcar como lidas e arquivar mensagens.", "@");
+  const messages = googleSnapshot?.messages ?? [];
+  return `<section class="dashboard-google-panel"><div class="dashboard-panel-heading"><div><span class="section-kicker">GMAIL · ${googleSnapshot?.unreadCount ?? 0} NÃO LIDOS</span><h2>Caixa de entrada</h2></div>${renderGooglePanelActions()}</div>${renderDashboardGoogleError()}
+    ${!googleSnapshot ? `<div class="dashboard-weather-loading">${googleLoading ? "Buscando mensagens…" : "Carregando mensagens…"}</div>` : messages.length ? `<div class="google-message-list">${messages.map((message) => `<article class="google-message"><div class="google-message-copy"><strong title="${escapeHtml(message.sender)}">${escapeHtml(message.sender)}</strong><small title="${escapeHtml(message.subject)}">${escapeHtml(message.subject)}</small><time>${escapeHtml(relativeTime(message.receivedAt))}</time></div><div class="google-message-actions"><button data-action="google-open-message" data-message-id="${escapeHtml(message.id)}" title="Abrir no Gmail" aria-label="Abrir mensagem">↗</button><button data-action="google-mark-message" data-message-id="${escapeHtml(message.id)}" title="Marcar como lida" aria-label="Marcar como lida">✓</button><button data-action="google-archive-message" data-message-id="${escapeHtml(message.id)}" title="Arquivar" aria-label="Arquivar">⌑</button></div></article>`).join("")}</div>` : `<div class="dashboard-empty"><span>@</span><strong>Caixa em dia</strong><small>Não há mensagens não lidas na caixa de entrada.</small></div>`}
+    <button class="google-open-service" data-action="google-open-service" data-service="mail">Abrir Gmail <span>↗</span></button></section>`;
+}
+
+function renderGoogleCalendarPanel() {
+  if (!googleAccount.connected) return renderDashboardConnectView("Agenda", "Veja os próximos compromissos, horários, locais e links de reunião da sua agenda Google.", "◷");
+  const events = googleSnapshot?.events ?? [];
+  return `<section class="dashboard-google-panel"><div class="dashboard-panel-heading"><div><span class="section-kicker">GOOGLE AGENDA · PRÓXIMOS 14 DIAS</span><h2>Seus compromissos</h2></div>${renderGooglePanelActions()}</div>${renderDashboardGoogleError()}
+    ${!googleSnapshot ? `<div class="dashboard-weather-loading">${googleLoading ? "Buscando compromissos…" : "Carregando compromissos…"}</div>` : events.length ? `<div class="google-event-list">${events.map((event) => `<article class="google-event"><div class="google-event-date"><strong>${escapeHtml(formatGoogleTime(event.startsAt, event.allDay))}</strong>${event.endsAt && !event.allDay ? `<small>até ${escapeHtml(formatGoogleTime(event.endsAt))}</small>` : ""}</div><div class="google-event-copy"><strong>${escapeHtml(event.title)}</strong>${event.location ? `<small>${escapeHtml(event.location)}</small>` : ""}${event.joinUrl ? `<button data-action="google-open-event" data-event-id="${escapeHtml(event.id)}" data-event-target="join">Entrar na reunião ↗</button>` : event.webUrl ? `<button data-action="google-open-event" data-event-id="${escapeHtml(event.id)}" data-event-target="event">Abrir evento ↗</button>` : ""}</div></article>`).join("")}</div>` : `<div class="dashboard-empty"><span>◷</span><strong>Agenda livre</strong><small>Não encontrei compromissos nos próximos 14 dias.</small></div>`}
+    <button class="google-open-service" data-action="google-open-service" data-service="calendar">Abrir Google Agenda <span>↗</span></button></section>`;
+}
+
+function renderGoogleTasksPanel() {
+  if (!googleAccount.connected) return renderDashboardConnectView("Tarefas", "Consulte tarefas pendentes, adicione uma tarefa rápida e marque como concluído.", "✓");
+  const tasks = googleSnapshot?.tasks ?? [];
+  return `<section class="dashboard-google-panel"><div class="dashboard-panel-heading"><div><span class="section-kicker">GOOGLE TAREFAS · ${tasks.length} PENDENTES</span><h2>O que falta fazer</h2></div>${renderGooglePanelActions()}</div>${renderDashboardGoogleError()}
+    <form class="google-task-form" data-action="google-task-form"><input name="title" maxlength="180" placeholder="Adicionar uma tarefa" aria-label="Nova tarefa" required ${googleLoading ? "disabled" : ""} /><button type="submit" aria-label="Adicionar tarefa" ${googleLoading ? "disabled" : ""}>+</button></form>
+    ${!googleSnapshot ? `<div class="dashboard-weather-loading">${googleLoading ? "Buscando tarefas…" : "Carregando tarefas…"}</div>` : tasks.length ? `<div class="google-task-list">${tasks.map((task) => `<article class="google-task"><button data-action="google-complete-task" data-task-id="${escapeHtml(task.id)}" aria-label="Concluir ${escapeHtml(task.title)}" title="Marcar como concluída"><span></span></button><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.dueAt ? `Prazo ${formatGoogleDueDate(task.dueAt)}` : task.listTitle)}</small></div></article>`).join("")}</div>` : `<div class="dashboard-empty google-tasks-empty"><span>✓</span><strong>Tudo concluído</strong><small>Quando surgir uma pendência, adicione aqui.</small></div>`}
+    <button class="google-open-service" data-action="google-open-service" data-service="tasks">Abrir Google Tarefas <span>↗</span></button></section>`;
+}
+
+function renderWeatherSearchForm() {
+  return `<form class="weather-search-form" data-action="weather-search-form"><label for="weather-city">Buscar cidade</label><div><input id="weather-city" name="city" maxlength="100" value="${escapeHtml(weatherQuery)}" placeholder="Ex.: São Paulo, Brasil" autocomplete="off" ${weatherSearchBusy ? "disabled" : ""} /><button class="utility-primary-action" type="submit" ${weatherSearchBusy ? "disabled" : ""}>${weatherSearchBusy ? "Buscando…" : "Buscar"}</button></div><small>A cidade e as coordenadas são enviadas ao Open-Meteo para consultar a previsão.</small></form>`;
+}
+
+function renderWeatherSearchResults() {
+  if (weatherSearchResults.length === 0) return "";
+  return `<div class="weather-search-results" role="listbox" aria-label="Resultados de cidades">${weatherSearchResults.map((location, index) => `<button type="button" data-action="weather-select-location" data-weather-index="${index}" role="option"><strong>${escapeHtml(location.name)}</strong><small>${escapeHtml([location.admin1, location.country].filter(Boolean).join(", "))}</small><span>›</span></button>`).join("")}</div>`;
+}
+
+function renderWeatherPanel() {
+  if (!weatherLocation) {
+    return `<section class="dashboard-weather"><div class="dashboard-panel-heading"><div><span class="section-kicker">PREVISÃO LOCAL</span><h2>Clima</h2></div></div>${renderWeatherSearchForm()}${weatherSearchMessage ? `<small class="dashboard-inline-status" role="status">${escapeHtml(weatherSearchMessage)}</small>` : ""}${renderWeatherSearchResults()}</section>`;
+  }
+  const current = weatherSnapshot?.current;
+  const snapshot = weatherSnapshot;
+  return `<section class="dashboard-weather">
+    <div class="dashboard-panel-heading"><div><span class="section-kicker">${updatesPaused ? "ATUALIZAÇÕES PAUSADAS" : "PREVISÃO LOCAL"}</span><h2>${escapeHtml(weatherPlaceLabel(weatherLocation))}</h2></div><div class="dashboard-panel-actions"><button class="weather-icon-action" data-action="weather-refresh" aria-label="Atualizar previsão" title="Atualizar" ${weatherLoading || updatesPaused ? "disabled" : ""}>↻</button><button class="weather-text-action" data-action="weather-change">Trocar cidade</button></div></div>
+    ${weatherSearchOpen ? `${renderWeatherSearchForm()}${weatherSearchMessage ? `<small class="dashboard-inline-status" role="status">${escapeHtml(weatherSearchMessage)}</small>` : ""}${renderWeatherSearchResults()}` : ""}
+    ${weatherError ? `<small class="dashboard-inline-error" role="status">${escapeHtml(weatherError)}</small>` : ""}
+    ${current ? `<div class="weather-current"><span class="weather-current-glyph" aria-hidden="true">${weatherCodeGlyph(current.weatherCode)}</span><div><strong>${Math.round(current.temperatureC)}°</strong><small>${weatherCodeDescription(current.weatherCode)} · sensação ${Math.round(current.feelsLikeC)}°</small></div></div>
+      <div class="weather-metrics"><span><small>Umidade</small><strong>${current.relativeHumidity}%</strong></span><span><small>Vento</small><strong>${Math.round(current.windSpeedKmh)} km/h</strong></span><span><small>Chuva agora</small><strong>${current.precipitationMm.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mm</strong></span></div>
+      <div class="weather-forecast">${snapshot!.days.map((day) => `<article class="weather-forecast-day"><small>${escapeHtml(weatherDayLabel(day.date))}</small><span aria-hidden="true">${weatherCodeGlyph(day.weatherCode)}</span><strong>${Math.round(day.maxC)}° <i>${Math.round(day.minC)}°</i></strong>${day.precipitationProbability === null ? "" : `<small class="weather-rain">${day.precipitationProbability}% chuva</small>`}</article>`).join("")}</div>
+      <small class="dashboard-attribution">Atualizado ${escapeHtml(relativeTime(snapshot!.checkedAt))} · dados por <button data-action="weather-attribution">Open-Meteo</button></small>`
+      : `<div class="dashboard-weather-loading">${weatherLoading ? "Consultando a previsão…" : "A previsão ainda não carregou."}</div>`}
+    </section>`;
+}
+
+function renderDashboardNotifications() {
+  const items = dashboardNotifications;
+  return `<section class="dashboard-notifications"><div class="dashboard-panel-heading"><div><span class="section-kicker">CENTRAL DO GHOSTY</span><h2>Notificações</h2></div><div class="dashboard-panel-actions">${items.some((item) => !item.read) ? `<button class="weather-text-action" data-action="dashboard-notifications-read">Marcar como lidas</button>` : ""}${items.length ? `<button class="weather-icon-action" data-action="dashboard-notifications-clear" aria-label="Limpar notificações" title="Limpar">×</button>` : ""}</div></div>
+    ${items.length ? `<div class="dashboard-notification-list">${items.map((item) => `<article class="dashboard-notification ${item.read ? "is-read" : ""}" data-kind="${item.kind}"><span class="dashboard-notification-icon">${dashboardNotificationIcon(item.kind)}</span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.body)}</small><time>${escapeHtml(relativeTime(item.occurredAt))}</time></div>${item.target ? `<button data-action="dashboard-notification-open" data-notification-id="${escapeHtml(item.id)}" aria-label="Abrir notificação">›</button>` : `<button data-action="dashboard-notification-read" data-notification-id="${escapeHtml(item.id)}" aria-label="Marcar como lida">✓</button>`}</article>`).join("")}</div>` : `<div class="dashboard-empty"><span>•</span><strong>Nenhuma notificação</strong><small>Novos e-mails, compromissos e lembretes aparecem aqui.</small></div>`}</section>`;
+}
+
+function renderDashboardPanel() {
+  if (dashboardView === "overview") return renderDashboardOverview();
+  if (dashboardView === "email") return renderGoogleEmailPanel();
+  if (dashboardView === "calendar") return renderGoogleCalendarPanel();
+  if (dashboardView === "tasks") return renderGoogleTasksPanel();
+  if (dashboardView === "notifications") return renderDashboardNotifications();
+  return renderWeatherPanel();
+}
+
+function renderDashboardPopup() {
+  const views: Array<{ id: DashboardView; label: string; glyph: string }> = [
+    { id: "overview", label: "Hoje", glyph: "◎" },
+    { id: "email", label: "E-mail", glyph: "@" },
+    { id: "calendar", label: "Agenda", glyph: "◷" },
+    { id: "tasks", label: "Tarefas", glyph: "✓" },
+    { id: "notifications", label: "Avisos", glyph: "•" },
+    { id: "weather", label: "Clima", glyph: "☁" },
+  ];
+  return `<section class="dashboard-page" data-dashboard-view="${dashboardView}"><nav class="dashboard-tabs" aria-label="Painéis">${views.map((view) => `<button type="button" data-action="dashboard-view" data-dashboard-view="${view.id}" class="${dashboardView === view.id ? "is-active" : ""}" aria-current="${dashboardView === view.id ? "page" : "false"}"><span>${view.glyph}</span><small>${view.label}</small>${view.id === "notifications" && dashboardUnreadCount() ? `<i>${Math.min(99, dashboardUnreadCount())}</i>` : ""}</button>`).join("")}</nav><div class="dashboard-panel">${renderDashboardPanel()}</div></section>`;
+}
+
+function refreshDashboardIfVisible() {
+  if (currentWindowLabel === "utility-popup" && utilityPopupMode === "dashboard") {
+    renderUtilityPopup();
+    return;
+  }
+  if (currentWindowLabel === "settings-window" || currentWindowLabel === "utility-popup") return;
+  const unreadCount = dashboardUnreadCount();
+  const menuButton = app.querySelector<HTMLButtonElement>('.menu-tabs [data-tab="panels"]');
+  let badge = menuButton?.querySelector<HTMLElement>("i");
+  if (menuButton && unreadCount && !badge) {
+    badge = document.createElement("i");
+    menuButton.append(badge);
+  }
+  if (badge) {
+    badge.textContent = String(Math.min(99, unreadCount));
+    if (!unreadCount) badge.remove();
+  }
+  if (activeTab !== "panels") return;
+  const tabView = app.querySelector<HTMLElement>(".tab-view");
+  if (!tabView) return;
+  const previousScrollTop = tabView.querySelector<HTMLElement>(".dashboard-panel")?.scrollTop ?? 0;
+  tabView.innerHTML = renderDashboardPopup();
+  bindTabContent(tabView);
+  const dashboardPanel = tabView.querySelector<HTMLElement>(".dashboard-panel");
+  if (dashboardPanel) dashboardPanel.scrollTop = previousScrollTop;
+}
+
 function homeViewLabel(view: HomeView = activeHomeView) {
   return view === "activity" ? "Codex" : view === "github" ? "GitHub" : view === "vercel" ? "Vercel" : view === "media" ? "Mídia" : "Agora";
 }
@@ -1620,6 +2336,7 @@ function renderHomeNow(status: ReturnType<typeof homeStatusPresentation>) {
     <small class="coucou-card-description" data-home-status-copy>${status.description}</small>
     <div class="coucou-card-actions">
       <button data-action="open-utility-popup" data-popup="focus">Foco</button>
+      <button data-action="open-panels-tab">Painéis</button>
       <button data-action="open-utility-popup" data-popup="pocket">Bolso</button>
       <button data-action="open-utility-popup" data-popup="clipboard">Prancheta</button>
     </div>
@@ -1765,7 +2482,7 @@ function renderPetPage() {
 
 function readUtilityPopupMode(): UtilityPopupMode | null {
   const mode = localStorage.getItem(KEYS.utilityPopup);
-  return mode === "focus" || mode === "focus-summary" || mode === "codex-activity" || mode === "pocket" || mode === "customize" || mode === "clipboard" || mode === "chat" ? mode : null;
+  return mode === "focus" || mode === "focus-summary" || mode === "codex-activity" || mode === "pocket" || mode === "customize" || mode === "clipboard" || mode === "dashboard" || mode === "chat" ? mode : null;
 }
 
 function readUtilityPopupPosition(): UtilityPopupPosition | null {
@@ -1935,6 +2652,7 @@ function renderQuickChat() {
 
 function renderUtilityPopupContent(mode: UtilityPopupMode) {
   if (mode === "chat") return renderQuickChat();
+  if (mode === "dashboard") return renderDashboardPopup();
   if (mode === "focus") {
     const remaining = focusRemainingMs();
     const progress = focusState.durationMs > 0 ? 100 - remaining / focusState.durationMs * 100 : 0;
@@ -2011,6 +2729,7 @@ function renderUtilityPopup() {
     pocket: { title: `Bolso do ${petName}`, subtitle: `${pocketItems.length}/8 itens · os originais ficam no lugar` },
     customize: { title: "Personalizar o Ghosty", subtitle: "Nome, aparência e acessório" },
     clipboard: { title: "Prancheta", subtitle: `${clipboardEntries.length} itens recentes` },
+    dashboard: { title: "Painéis do Ghosty", subtitle: "Seu dia em um só lugar" },
     chat: { title: "", subtitle: "" },
   };
   const heading = copy[utilityPopupMode];
@@ -2026,6 +2745,11 @@ function renderUtilityPopup() {
     </main>`;
   bindUtilityPopup();
   if (utilityPopupMode === "focus") paintFocusTimer();
+  if (utilityPopupMode === "dashboard") {
+    bindPetInteractions(app);
+    if (weatherLocation && !weatherLoading && (!weatherSnapshot || Date.now() - weatherSnapshot.checkedAt > 30 * 60_000)) void refreshWeather();
+    if (googleAccount.connected && !googleLoading && (!googleSnapshot || Date.now() - googleSnapshot.checkedAt > 5 * 60_000)) void refreshGoogleSnapshot();
+  }
 }
 
 function bindUtilityPopup() {
@@ -2085,6 +2809,122 @@ function bindUtilityPopup() {
       updatePetAtmosphere();
     });
   }
+  if (utilityPopupMode === "dashboard") bindDashboardPopup(popup);
+}
+
+function selectDashboardView(view: DashboardView) {
+  dashboardView = view;
+  localStorage.setItem(KEYS.dashboardView, view);
+  refreshDashboardIfVisible();
+  if (view === "weather" && weatherLocation && (!weatherSnapshot || Date.now() - weatherSnapshot.checkedAt > 30 * 60_000)) void refreshWeather();
+}
+
+function markDashboardNotificationRead(id?: string) {
+  dashboardNotifications = dashboardNotifications.map((notification) =>
+    !id || notification.id === id ? { ...notification, read: true } : notification);
+  persistDashboardNotifications();
+  refreshDashboardIfVisible();
+}
+
+function bindDashboardPopup(popup: HTMLElement) {
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=dashboard-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.dashboardView;
+      if (view === "overview" || view === "email" || view === "calendar" || view === "tasks" || view === "notifications" || view === "weather") selectDashboardView(view);
+    });
+  });
+  popup.querySelector("[data-action=dashboard-open-settings]")?.addEventListener("click", () => openSettingsWindow("panels"));
+  popup.querySelector<HTMLFormElement>("[data-action=weather-search-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const input = form.elements.namedItem("city") as HTMLInputElement;
+    void searchWeatherLocations(input.value);
+  });
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=weather-select-location]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const location = weatherSearchResults[Number(button.dataset.weatherIndex)];
+      if (location) void selectWeatherLocation(location);
+    });
+  });
+  popup.querySelector("[data-action=weather-change]")?.addEventListener("click", () => {
+    weatherSearchOpen = true;
+    weatherSearchMessage = "";
+    weatherSearchResults = [];
+    renderUtilityPopup();
+    app.querySelector<HTMLInputElement>("#weather-city")?.focus();
+  });
+  popup.querySelector("[data-action=weather-refresh]")?.addEventListener("click", () => void refreshWeather());
+  popup.querySelector("[data-action=weather-attribution]")?.addEventListener("click", () => {
+    void invoke("open_targets", { targets: ["https://open-meteo.com/"] }).catch(() => undefined);
+  });
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=dashboard-notification-read]").forEach((button) => {
+    button.addEventListener("click", () => markDashboardNotificationRead(button.dataset.notificationId));
+  });
+  popup.querySelector("[data-action=dashboard-notifications-read]")?.addEventListener("click", () => {
+    markDashboardNotificationRead();
+    signalGhostyReaction("thinking", "Todos os avisos foram conferidos", 1300);
+  });
+  popup.querySelector("[data-action=dashboard-notifications-clear]")?.addEventListener("click", () => {
+    dashboardNotifications = [];
+    persistDashboardNotifications();
+    renderUtilityPopup();
+    signalGhostyReaction("thinking", "A caixa de avisos está limpa", 1300);
+  });
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=dashboard-notification-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const notification = dashboardNotifications.find((item) => item.id === button.dataset.notificationId);
+      if (!notification) return;
+      markDashboardNotificationRead(notification.id);
+      if (notification.target) void invoke("open_targets", { targets: [notification.target] }).catch((error) => {
+        signalGhostyReaction("error", `Não consegui abrir este aviso: ${String(error)}`, 2300);
+      });
+    });
+  });
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-refresh]").forEach((button) => button.addEventListener("click", () => void refreshGoogleSnapshot()));
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-open-message]").forEach((button) => button.addEventListener("click", () => {
+    const message = googleSnapshot?.messages.find((item) => item.id === button.dataset.messageId);
+    const target = message && safeQuickChatWebsiteUrl(message.webUrl);
+    if (target) void invoke("open_targets", { targets: [target] }).catch((error) => {
+      googleError = String(error);
+      renderUtilityPopup();
+    });
+  }));
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-mark-message], [data-action=google-archive-message]").forEach((button) => button.addEventListener("click", () => {
+    const message = googleSnapshot?.messages.find((item) => item.id === button.dataset.messageId);
+    if (message) void runGoogleMessageAction(message, button.dataset.action === "google-archive-message" ? "archive" : "read");
+  }));
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-open-event]").forEach((button) => button.addEventListener("click", () => {
+    const item = googleSnapshot?.events.find((event) => event.id === button.dataset.eventId);
+    const candidate = button.dataset.eventTarget === "join" ? item?.joinUrl : item?.webUrl;
+    const target = candidate && safeQuickChatWebsiteUrl(candidate);
+    if (target) void invoke("open_targets", { targets: [target] }).catch((error) => {
+      googleError = String(error);
+      renderUtilityPopup();
+    });
+  }));
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-complete-task]").forEach((button) => button.addEventListener("click", () => {
+    const task = googleSnapshot?.tasks.find((item) => item.id === button.dataset.taskId);
+    if (task) void completeGoogleTask(task);
+  }));
+  popup.querySelectorAll<HTMLFormElement>("[data-action=google-task-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = form.elements.namedItem("title") as HTMLInputElement;
+    const title = input.value.trim();
+    if (!title) return;
+    void addGoogleTask(title).then((added) => { if (added) input.value = ""; });
+  }));
+  popup.querySelectorAll<HTMLButtonElement>("[data-action=google-open-service]").forEach((button) => button.addEventListener("click", () => {
+    const urls: Record<string, string> = {
+      mail: "https://mail.google.com/",
+      calendar: "https://calendar.google.com/",
+      tasks: "https://tasks.google.com/",
+    };
+    const target = urls[button.dataset.service ?? ""];
+    if (target) void invoke("open_targets", { targets: [target] }).catch((error) => {
+      googleError = String(error);
+      renderUtilityPopup();
+    });
+  }));
 }
 
 function bindFocusSummary(container: ParentNode) {
@@ -2675,6 +3515,10 @@ async function stopQuickChatSession() {
 }
 
 async function openUtilityPopup(mode: UtilityPopupMode) {
+  if (mode === "dashboard") {
+    openPanelsInBar();
+    return;
+  }
   if (mode === "chat") {
     quickChatEntryPending = true;
     localStorage.setItem(KEYS.quickChatEntry, String(Date.now()));
@@ -2690,6 +3534,7 @@ async function openUtilityPopup(mode: UtilityPopupMode) {
     await invoke("show_utility_popup", {
       positionX: position?.x ?? null,
       positionY: position?.y ?? null,
+      dashboard: false,
     });
   } catch (error) {
     console.error("NÃ£o consegui abrir o popup do Edge Ghosty", error);
@@ -2702,6 +3547,16 @@ function openSettingsWindow(tab: SettingsTab = "general") {
   void invoke("show_settings_window").catch((error) => {
     console.error("Não consegui abrir as configurações do Edge Ghosty", error);
   });
+}
+
+function openPanelsInBar() {
+  if (currentWindowLabel === "settings-window" || currentWindowLabel === "utility-popup") {
+    localStorage.setItem(KEYS.openPanelsRequest, makeId());
+    void getCurrentWindow().hide().catch(() => undefined);
+    return;
+  }
+  updateActiveTab("panels");
+  setExpanded(true);
 }
 
 function refreshShortcutsScreen() {
@@ -2753,7 +3608,14 @@ async function closeUtilityPopup() {
 }
 
 function startUtilityPopupWindow() {
+  if (localStorage.getItem(KEYS.utilityPopup) === "dashboard") {
+    localStorage.removeItem(KEYS.utilityPopup);
+    localStorage.setItem(KEYS.openPanelsRequest, makeId());
+    void getCurrentWindow().hide().catch(() => undefined);
+    return;
+  }
   renderUtilityPopup();
+  void loadGoogleWorkspace(false);
   const currentWindow = getCurrentWindow();
   void currentWindow.onMoved(({ payload }) => {
     if (utilityPopupMode === "chat") return;
@@ -2898,6 +3760,7 @@ function renderActiveTab() {
   if (onboardingLaunchGreetingActive) return "";
   if (onboardingOpen) return renderOnboarding();
   if (activeTab === "pet") return renderPetPage();
+  if (activeTab === "panels") return renderDashboardPopup();
   return renderHomePage();
 }
 
@@ -3048,6 +3911,26 @@ function setPetMood(mood: string, durationMs = 1400) {
 
 function setPetActivity(state: PetState, detail = "") {
   app.querySelectorAll<HTMLElement>(".pet").forEach((pet) => petMotionEngines.get(pet)?.setState(state, false, detail));
+}
+
+function signalGhostyReaction(state: PetState, detail: string, durationMs = 1700) {
+  const signal: PetReactionSignal = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, state, detail: detail.slice(0, 220), until: Date.now() + durationMs };
+  lastPetReactionId = signal.id;
+  setPetActivity(state, signal.detail);
+  void emit("edge-ghosty-pet-reaction", signal).catch(() => undefined);
+  window.setTimeout(() => {
+    if (lastPetReactionId === signal.id && signal.until <= Date.now()) setPetActivity("idle");
+  }, durationMs + 40);
+}
+
+function receiveGhostyReaction(signal: PetReactionSignal) {
+  const states: PetState[] = ["idle", "working", "thinking", "searching", "approval", "question", "error", "finished", "ratelimit", "sleeping", "dizzy"];
+  if (!signal || !signal.id || signal.id === lastPetReactionId || !states.includes(signal.state) || signal.until <= Date.now()) return;
+  lastPetReactionId = signal.id;
+  setPetActivity(signal.state, signal.detail.slice(0, 220));
+  window.setTimeout(() => {
+    if (lastPetReactionId === signal.id && signal.until <= Date.now()) setPetActivity("idle");
+  }, Math.max(0, signal.until - Date.now()) + 40);
 }
 
 function setCodexPetActivity(state: PetState, detail = "") {
@@ -3986,6 +4869,8 @@ function bindTabContent(tabView: HTMLElement) {
     const view = button.dataset.homeView;
     if (view === "now" || view === "activity" || view === "github" || view === "vercel" || view === "media") updateActiveHomeView(view);
   }));
+  tabView.querySelector<HTMLButtonElement>("[data-action=open-panels-tab]")?.addEventListener("click", openPanelsInBar);
+  if (activeTab === "panels") bindDashboardPopup(tabView);
   tabView.querySelector<HTMLButtonElement>("[data-action=open-shortcuts]")?.addEventListener("click", () => openSettingsWindow("shortcuts"));
   const volumeSlider = tabView.querySelector<HTMLInputElement>("#volume");
   volumeSlider?.addEventListener("input", (event) => {
@@ -4070,7 +4955,7 @@ function bindTabContent(tabView: HTMLElement) {
 
   tabView.querySelectorAll<HTMLButtonElement>("[data-action=open-utility-popup]").forEach((button) => button.addEventListener("click", () => {
     const mode = button.dataset.popup;
-    if (mode === "focus" || mode === "focus-summary" || mode === "codex-activity" || mode === "pocket" || mode === "customize" || mode === "clipboard" || mode === "chat") void openUtilityPopup(mode);
+    if (mode === "focus" || mode === "focus-summary" || mode === "codex-activity" || mode === "pocket" || mode === "customize" || mode === "clipboard" || mode === "dashboard" || mode === "chat") void openUtilityPopup(mode);
   }));
   bindGithubActions(tabView);
 
@@ -4221,6 +5106,10 @@ function updateActiveTab(tab: MenuTab) {
   if (island) applyIslandVariables(island);
   if (expanded) animateIsland(true);
   if (tab === "home" && previousTab !== "home") void refreshMediaInfo();
+  if (tab === "panels") {
+    if (weatherLocation && !updatesPaused && (!weatherSnapshot || Date.now() - weatherSnapshot.checkedAt > 30 * 60_000)) void refreshWeather();
+    if (googleAccount.connected && !updatesPaused && (!googleSnapshot || Date.now() - googleSnapshot.checkedAt > 5 * 60_000)) void refreshGoogleSnapshot();
+  }
 }
 
 function updateActiveHomeView(view: HomeView) {
@@ -4337,6 +5226,10 @@ async function installAppUpdate() {
   }
 }
 
+function refreshGoogleSettingsUi() {
+  if (currentWindowLabel === "settings-window" && settingsTab === "panels") renderSettingsWindow();
+}
+
 function renderSettingsContent() {
   if (settingsTab === "shortcuts") {
     return `
@@ -4348,6 +5241,7 @@ function renderSettingsContent() {
         ${renderShortcutsPage()}
       </div>`;
   }
+  if (settingsTab === "panels") return renderPanelsSettings();
   const lengthLabel = isVerticalEdge() ? "Altura da barrinha" : "Largura da barrinha";
   return `
     <div class="settings-page">
@@ -4470,12 +5364,30 @@ function renderSettingsContent() {
     </div>`;
 }
 
+function renderPanelsSettings() {
+  const connected = googleAccount.connected;
+  const configured = googleAccount.configured;
+  return `<div class="settings-page panels-settings-page"><div class="settings-scroll"><section class="settings-context-card">
+    <p class="settings-intro">Conecte serviços que o Ghosty pode resumir nos seus painéis. O login Google acontece no navegador e a senha nunca passa pelo app.</p>
+    <section class="control-card setting-card google-workspace-settings">
+      <div class="google-settings-heading"><div><span class="section-kicker">PAINÉIS DO GHOSTY</span><div class="setting-heading">Google Workspace</div></div><span class="google-connection-dot ${connected ? "is-connected" : googleAuthPending ? "is-pending" : ""}" aria-hidden="true"></span></div>
+      <p class="settings-note">${connected ? `Conectado como <strong>${escapeHtml(googleAccount.email ?? "conta Google")}</strong>.` : "Conecte sua conta para ativar Gmail, Agenda e Tarefas."}</p>
+      <small id="google-account-status" class="github-settings-status" role="status">${escapeHtml(googleStatusMessage)}</small>
+      ${connected ? `<div class="google-workspace-actions"><button class="reset-button" data-action="google-refresh-settings" type="button" ${googleLoading || updatesPaused ? "disabled" : ""}>${googleLoading ? "Atualizando…" : "Atualizar agora"}</button><button class="text-button" data-action="google-disconnect" type="button">Desconectar deste dispositivo</button></div>` : `<div class="google-workspace-actions"><button class="reset-button" data-action="google-connect" type="button" ${!configured || googleAuthPending || googleStatusLoading ? "disabled" : ""}>${!configured ? "Indisponível nesta versão" : googleAuthPending ? "Aguardando Google…" : "Conectar Google"}</button>${googleAuthPending ? `<button class="text-button" data-action="google-auth-cancel" type="button">Cancelar login</button>` : ""}</div>`}
+      <div class="google-permissions-note"><strong>Permissões solicitadas</strong><span>Gmail: ver cabeçalhos, marcar como lido e arquivar. A API exige escopo de modificação, embora o Ghosty não envie mensagens.</span><span>Agenda: somente leitura. Tarefas: listar, criar e concluir tarefas.</span><span>Os tokens ficam no Gerenciador de Credenciais do Windows. Remover a conexão apaga o token local; a autorização na conta Google pode ser revogada em <button class="text-button" data-action="google-open-link" data-google-url="https://myaccount.google.com/permissions" type="button">Permissões da Conta Google ↗</button>.</span></div>
+      <small class="settings-note">Na primeira conexão, escolha sua conta Google no navegador e aprove as permissões acima. Você pode revogar o acesso a qualquer momento nas permissões da Conta Google.</small>
+    </section>
+    <section class="control-card setting-card dashboard-local-settings"><div class="setting-heading">Notificações e clima</div><p class="settings-note">Avisos resumidos ficam neste dispositivo. A cidade só é consultada depois que você a escolher; o Ghosty não pede localização automática.</p><button class="reset-button" data-action="open-dashboard" type="button">Ir para a aba Painéis na barra</button></section>
+  </section></div></div>`;
+}
+
 function renderSettingsWindow() {
   document.body.dataset.window = "settings";
-  const title = settingsTab === "shortcuts" ? "Atalhos" : "Geral";
+  const title = settingsTab === "shortcuts" ? "Atalhos" : settingsTab === "panels" ? "Painéis" : "Geral";
   const subtitle = settingsTab === "shortcuts"
     ? "Organize o que o Ghosty pode abrir por você."
-    : "Ajuste a barrinha, o comportamento e as integrações.";
+    : settingsTab === "panels" ? "Conecte contas e configure seus painéis."
+      : "Ajuste a barrinha, o comportamento e as integrações.";
   app.innerHTML = `
     <div class="settings-shell">
       <aside class="settings-sidebar">
@@ -4483,6 +5395,7 @@ function renderSettingsWindow() {
         <nav class="settings-nav" aria-label="Configurações">
           <button class="settings-nav-item ${settingsTab === "general" ? "is-active" : ""}" data-settings-tab="general"><span>${menuIcon("settings")}</span>Geral</button>
           <button class="settings-nav-item ${settingsTab === "shortcuts" ? "is-active" : ""}" data-settings-tab="shortcuts"><span>${menuIcon("shortcuts")}</span>Atalhos</button>
+          <button class="settings-nav-item ${settingsTab === "panels" ? "is-active" : ""}" data-settings-tab="panels"><span>${menuIcon("home")}</span>Painéis</button>
         </nav>
         <div class="settings-sidebar-pet">
           ${renderPetCharacter("settings-sidebar-ghosty")}
@@ -4497,7 +5410,7 @@ function renderSettingsWindow() {
   bindPetInteractions(app);
   app.querySelectorAll<HTMLButtonElement>("[data-settings-tab]").forEach((button) => button.addEventListener("click", () => {
     const tab = button.dataset.settingsTab;
-    if (tab !== "general" && tab !== "shortcuts") return;
+    if (tab !== "general" && tab !== "shortcuts" && tab !== "panels") return;
     settingsTab = tab;
     localStorage.setItem(KEYS.settingsTab, tab);
     renderSettingsWindow();
@@ -4613,6 +5526,20 @@ function bindSettings() {
     void saveVercelToken();
   });
   app.querySelector<HTMLButtonElement>("[data-action=vercel-clear-token]")?.addEventListener("click", () => void clearVercelToken());
+  app.querySelector<HTMLButtonElement>("[data-action=google-connect]")?.addEventListener("click", () => void startGoogleAuth());
+  app.querySelector<HTMLButtonElement>("[data-action=google-auth-cancel]")?.addEventListener("click", () => void cancelGoogleAuth());
+  app.querySelector<HTMLButtonElement>("[data-action=google-disconnect]")?.addEventListener("click", () => void disconnectGoogleWorkspace());
+  app.querySelector<HTMLButtonElement>("[data-action=google-refresh-settings]")?.addEventListener("click", () => void refreshGoogleSnapshot());
+  app.querySelectorAll<HTMLButtonElement>("[data-action=google-open-link]").forEach((button) => button.addEventListener("click", () => {
+    const target = safeQuickChatWebsiteUrl(button.dataset.googleUrl);
+    if (target) void invoke("open_targets", { targets: [target] }).catch((error) => {
+      googleStatusMessage = String(error);
+      refreshGoogleSettingsUi();
+    });
+  }));
+  app.querySelector<HTMLButtonElement>("[data-action=open-dashboard]")?.addEventListener("click", () => {
+    openPanelsInBar();
+  });
   app.querySelector<HTMLButtonElement>("[data-action=vercel-token-help]")?.addEventListener("click", () => {
     void invoke("open_targets", { targets: ["https://vercel.com/account/tokens"] }).catch(() => undefined);
   });
@@ -4858,6 +5785,7 @@ function render() {
             ${onboardingOpen ? '<div class="onboarding-brand">EDGE GHOSTY</div>' : `<nav class="menu-tabs" role="group" aria-label="Seções do Edge Ghosty">
               <button class="icon-button menu-tab ${activeTab === "home" ? "is-active" : ""}" aria-pressed="${activeTab === "home"}" data-tab="home" aria-label="Início" title="Início">${menuIcon("home")}</button>
               <button class="icon-button menu-tab ${activeTab === "pet" ? "is-active" : ""}" aria-pressed="${activeTab === "pet"}" data-tab="pet" aria-label="Pet" title="Pet">${menuIcon("pet")}</button>
+              <button class="icon-button menu-tab ${activeTab === "panels" ? "is-active" : ""}" aria-pressed="${activeTab === "panels"}" data-tab="panels" aria-label="Painéis" title="Painéis">${menuIcon("panels")}${dashboardUnreadCount() ? `<i>${Math.min(99, dashboardUnreadCount())}</i>` : ""}</button>
             </nav>`}
             ${onboardingOpen ? "" : `<div class="menu-header-actions">
               <button class="icon-button settings-button ${availableAppUpdate ? "has-app-update" : ""}" data-action="settings" aria-label="${availableAppUpdate ? "Configurações — atualização disponível" : "Abrir configurações"}" title="${availableAppUpdate ? "Atualização do Ghosty disponível" : "Configurações"}">${menuIcon("settings")}</button>
@@ -5041,6 +5969,13 @@ async function startMainWindow() {
   refreshHomeStatusUi();
   void refreshGithubStatus();
   void refreshVercelStatus();
+  void loadGoogleWorkspace(true);
+  if (weatherLocation && !updatesPaused && (!weatherSnapshot || Date.now() - weatherSnapshot.checkedAt > 30 * 60_000)) void refreshWeather();
+  if (weatherRefreshInterval === undefined) {
+    weatherRefreshInterval = window.setInterval(() => {
+      if (weatherLocation && !updatesPaused && (!weatherSnapshot || Date.now() - weatherSnapshot.checkedAt > 30 * 60_000)) void refreshWeather();
+    }, 5 * 60_000);
+  }
   if (githubRefreshInterval === undefined) {
     githubRefreshInterval = window.setInterval(() => {
       if (githubConnected && !updatesPaused) void refreshGithubSnapshot();
@@ -5050,6 +5985,11 @@ async function startMainWindow() {
     vercelRefreshInterval = window.setInterval(() => {
       if (vercelConnected && !updatesPaused) void refreshVercelSnapshot();
     }, 5 * 60_000);
+  }
+  if (googleRefreshInterval === undefined) {
+    googleRefreshInterval = window.setInterval(() => {
+      if (googleAccount.connected && !updatesPaused && (!googleSnapshot || Date.now() - googleSnapshot.checkedAt > 5 * 60_000)) void refreshGoogleSnapshot();
+    }, 60_000);
   }
   let nextMediaRefreshAt = 0;
   let nextMixerRefreshAt = 0;
@@ -5112,6 +6052,7 @@ async function startSettingsWindow() {
   void refreshCodexHooksStatus();
   void refreshGithubStatus();
   void refreshVercelStatus();
+  void loadGoogleWorkspace(false);
   try {
     displays = await invoke<DisplayInfo[]>("list_displays");
     if (!selectedDisplayIds.some((id) => displays.some((display) => display.id === id))) {
@@ -5314,6 +6255,7 @@ void listen<boolean>("edge-ghosty-pause-updated", ({ payload }) => {
   if (!payload) {
     if (githubConnected) void refreshGithubSnapshot();
     if (vercelConnected) void refreshVercelSnapshot();
+    if (googleAccount.connected) void refreshGoogleSnapshot();
   }
 });
 void listen<GithubSnapshot | null>("edge-ghosty-github-snapshot", ({ payload }) => {
@@ -5340,14 +6282,33 @@ void listen<VercelSnapshot | null>("edge-ghosty-vercel-snapshot", ({ payload }) 
   refreshGithubCard();
   refreshVercelSettingsUi();
 });
+void listen<GoogleSnapshot | null>("edge-ghosty-google-snapshot", ({ payload }) => {
+  applyGoogleSnapshot(payload, true);
+});
+void listen<string>("edge-ghosty-google-error", ({ payload }) => {
+  googleError = payload;
+  googleStatusMessage = payload;
+  refreshDashboardIfVisible();
+  if (currentWindowLabel === "settings-window") refreshGoogleSettingsUi();
+});
+void listen<PetReactionSignal>("edge-ghosty-pet-reaction", ({ payload }) => {
+  receiveGhostyReaction(payload);
+});
 if (currentWindowLabel === "utility-popup") window.setInterval(() => {
   if (utilityPopupMode === "focus") paintFocusTimer();
 }, 250);
 else window.setInterval(tickFeatures, 1000);
 
 window.addEventListener("storage", (event) => {
+  if (event.key === KEYS.openPanelsRequest) {
+    if (currentWindowLabel !== "settings-window" && currentWindowLabel !== "utility-popup") {
+      updateActiveTab("panels");
+      setExpanded(true);
+    }
+    return;
+  }
   if (event.key === KEYS.settingsTab) {
-    settingsTab = readChoice(KEYS.settingsTab, ["general", "shortcuts"], "general");
+    settingsTab = readChoice(KEYS.settingsTab, ["general", "shortcuts", "panels"], "general");
     if (currentWindowLabel === "settings-window") renderSettingsWindow();
     return;
   }
@@ -5383,6 +6344,27 @@ window.addEventListener("storage", (event) => {
   if (event.key === KEYS.codexActivity) {
     codexActivity = loadCodexActivity();
     refreshCodexActivityUi();
+    return;
+  }
+  if (event.key === KEYS.dashboardView) {
+    dashboardView = readChoice(KEYS.dashboardView, ["overview", "email", "calendar", "tasks", "notifications", "weather"], "overview");
+    refreshDashboardIfVisible();
+    return;
+  }
+  if (event.key === KEYS.dashboardNotifications) {
+    dashboardNotifications = readDashboardNotifications();
+    refreshDashboardIfVisible();
+    return;
+  }
+  if (event.key === KEYS.weatherLocation) {
+    weatherLocation = readWeatherLocation();
+    weatherSnapshot = readWeatherSnapshot();
+    refreshDashboardIfVisible();
+    return;
+  }
+  if (event.key === KEYS.weatherSnapshot) {
+    weatherSnapshot = readWeatherSnapshot();
+    refreshDashboardIfVisible();
     return;
   }
   if (event.key === KEYS.quickChatDraft) {
