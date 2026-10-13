@@ -1,6 +1,6 @@
 [package]
 name = "edge-ghosty"
-version = "1.0.9"
+version = "1.0.10"
 description = "A tiny edge menu for Windows"
 authors = ["Edge Ghosty"]
 edition = "2021"
