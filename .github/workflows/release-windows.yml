@@ -40,6 +40,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          EDGE_GHOSTY_GOOGLE_CLIENT_ID: ${{ vars.EDGE_GHOSTY_GOOGLE_CLIENT_ID }}
+          EDGE_GHOSTY_GOOGLE_CLIENT_SECRET: ${{ secrets.EDGE_GHOSTY_GOOGLE_CLIENT_SECRET }}
         with:
           args: --bundles nsis
           tagName: ${{ github.ref_name }}

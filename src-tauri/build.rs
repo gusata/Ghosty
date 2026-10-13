@@ -2,7 +2,54 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     ensure_dev_icon();
+    configure_google_client_id();
+    configure_google_client_secret();
     tauri_build::build();
+}
+
+fn configure_google_client_id() {
+    const ENV_NAME: &str = "EDGE_GHOSTY_GOOGLE_CLIENT_ID";
+    println!("cargo:rerun-if-env-changed={ENV_NAME}");
+
+    let client_id = env::var(ENV_NAME).unwrap_or_default();
+    let client_id = client_id.trim();
+    if client_id.is_empty() {
+        if env::var("PROFILE").ok().as_deref() == Some("release") {
+            panic!("Set {ENV_NAME} before building a release; Google Workspace login needs the app's OAuth client ID.");
+        }
+        return;
+    }
+
+    let valid = (20..=180).contains(&client_id.len())
+        && client_id.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+        })
+        && client_id.ends_with(".apps.googleusercontent.com");
+    if !valid {
+        panic!("{ENV_NAME} must be a valid Google OAuth desktop client ID.");
+    }
+
+    println!("cargo:rustc-env={ENV_NAME}={client_id}");
+}
+
+fn configure_google_client_secret() {
+    const ENV_NAME: &str = "EDGE_GHOSTY_GOOGLE_CLIENT_SECRET";
+    println!("cargo:rerun-if-env-changed={ENV_NAME}");
+
+    let client_secret = env::var(ENV_NAME).unwrap_or_default();
+    let client_secret = client_secret.trim();
+    if client_secret.is_empty() {
+        return;
+    }
+
+    if client_secret.len() > 1024
+        || !client_secret.is_ascii()
+        || client_secret.bytes().any(|byte| byte.is_ascii_control())
+    {
+        panic!("{ENV_NAME} must be a valid Google OAuth client secret.");
+    }
+
+    println!("cargo:rustc-env={ENV_NAME}={client_secret}");
 }
 
 // Keep a transparent fallback for older development checkouts that lack the
