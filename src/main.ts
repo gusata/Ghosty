@@ -8,114 +8,73 @@ import { Tracked } from "./anim";
 import { PetMotionEngine, type PetState } from "./pet-motion";
 import { LaunchGreeting } from "./launch-greeting";
 import { playGhostySound, setGhostySoundEnabled, setGhostySoundVolume } from "./sounds";
+import {
+  escapeHtml,
+  makeId,
+  formatDuration,
+  formatMediaTime,
+  weatherCodeDescription,
+  weatherCodeGlyph,
+  weatherDayLabel,
+  relativeTime,
+  formatGoogleTime,
+  localCalendarDate,
+  formatGoogleDueDate,
+  formatFileSize,
+} from "./lib/format";
+import { menuIcon, type MenuIconName } from "./ui/icons";
 
-type Shortcut = { id: string; name: string; glyph: string; targets: string[]; action?: "focus"; custom?: boolean };
-type PocketItem = { id: string; name: string; kind: "file" | "image" | "text"; value: string; addedAt: number; truncated?: boolean };
-type ClipboardEntry = { id: string; text: string; addedAt: number; pinned?: boolean };
-type PetSkin = "pearl" | "smoke" | "midnight" | "mint" | "coral" | "lavender";
-type PetAccessory = "none" | "star" | "bow" | "halo" | "leaf" | "crown";
-type FocusState = { durationMs: number; remainingMs: number; endsAt: number; running: boolean; startedAt: number };
-type FocusHistoryEntry = { id: string; startedAt: number; endedAt: number; durationMs: number; completed: boolean };
-type MediaInfo = {
-  title: string;
-  artist: string;
-  playing: boolean;
-  source: string;
-  trackId: string;
-  artworkDataUrl: string;
-  positionMs: number;
-  durationMs: number;
-  canSeek: boolean;
-};
-type AudioAppVolume = { processId: number; name: string; volume: number };
-type Edge = "left" | "right" | "top" | "bottom";
-type MenuTab = "home" | "pet" | "panels";
-type SettingsTab = "general" | "shortcuts" | "panels";
-type InteractionMode = "hover" | "click";
-type HomeView = "now" | "activity" | "github" | "vercel" | "media";
-type UtilityPopupMode = "focus" | "focus-summary" | "codex-activity" | "pocket" | "customize" | "clipboard" | "dashboard" | "chat";
-type DashboardView = "overview" | "email" | "calendar" | "tasks" | "notifications" | "weather";
-type WeatherLocation = {
-  id: number | null;
-  name: string;
-  admin1: string | null;
-  country: string | null;
-  countryCode: string | null;
-  latitude: number;
-  longitude: number;
-  timezone: string | null;
-};
-type WeatherDay = { date: string; weatherCode: number; minC: number; maxC: number; precipitationProbability: number | null };
-type WeatherSnapshot = {
-  location: WeatherLocation;
-  current: { temperatureC: number; feelsLikeC: number; relativeHumidity: number; weatherCode: number; windSpeedKmh: number; precipitationMm: number; isDay: boolean };
-  days: WeatherDay[];
-  checkedAt: number;
-};
-type GoogleEmailMessage = { id: string; threadId: string; subject: string; sender: string; receivedAt: number; webUrl: string };
-type GoogleCalendarEvent = { id: string; title: string; startsAt: string; endsAt: string | null; allDay: boolean; location: string | null; webUrl: string | null; joinUrl: string | null };
-type GoogleTask = { id: string; listId: string; listTitle: string; title: string; dueAt: string | null };
-type GoogleSnapshot = { email: string; checkedAt: number; unreadCount: number; messages: GoogleEmailMessage[]; events: GoogleCalendarEvent[]; tasks: GoogleTask[] };
-type GoogleAccountStatus = { connected: boolean; email: string | null; configured: boolean };
-type GoogleAuthProgress = { status: "idle" | "waiting" | "connected" | "error"; email: string | null; message: string | null };
-type DashboardNotification = {
-  id: string;
-  kind: "email" | "calendar" | "task" | "weather" | "system";
-  title: string;
-  body: string;
-  occurredAt: number;
-  read: boolean;
-  target?: string;
-};
-type PetReactionSignal = { id: string; state: PetState; detail: string; until: number };
-type UtilityPopupPosition = { x: number; y: number };
-type QuickChatMessage = { id: string; role: "user" | "assistant"; text: string; pending?: boolean };
-type QuickChatApproval = { requestId: number | string; method: string; params: Record<string, unknown>; preview?: string };
-type QuickChatReasoning = { reasoningEffort: string; description?: string };
-type QuickChatModel = { id: string; displayName: string; supportedReasoningEfforts: QuickChatReasoning[]; defaultReasoningEffort?: string };
-type QuickChatCatalog = { authenticated: boolean; models: QuickChatModel[] };
-type QuickChatEvent = { method: string; params?: Record<string, unknown>; requestId?: number | string };
-type QuickChatWebsiteRequest = { siteName: string; url: string | null; continuation?: string };
-type DisplayInfo = {
-  id: string;
-  name: string;
-  width: number;
-  height: number;
-  isPrimary: boolean;
-};
-type CursorPosition = { x: number; y: number; inside: boolean; dragging: boolean };
-type LayoutUpdate = {
-  edge: Edge;
-  barLength: number;
-  barThickness: number;
-  positionPercent: number;
-  closeDelay: number;
-  allDisplays: boolean;
-  selectedDisplayIds: string[];
-  displayIds: string[];
-  activeLabel: string;
-  expanded: boolean;
-};
-type CodexHookEvent = {
-  eventName: string;
-  occurredAt: number;
-  toolName: string | null;
-  agentType: string | null;
-  approvalId: string | null;
-  approvalDescription: string | null;
-  approvalExpiresAt: number | null;
-  sessionId?: string | null;
-};
-type CodexApproval = { requestId: string; toolName: string; description: string; expiresAt: number };
-type CodexApprovalDecision = "allow" | "deny";
-type CodexActivityDay = { sessions: number; completed: number; interrupted: number; toolCalls: number; approvals: number; activeMs: number };
-type CodexActivity = Record<string, CodexActivityDay>;
-type CodexRecentActivity = { eventName: string; occurredAt: number; toolName: string | null; agentType: string | null };
-type GithubPullRequest = { title: string; repository: string; number: number; url: string; draft: boolean; ciStatus: string | null };
-type GithubSnapshot = { login: string; checkedAt: number; authored: GithubPullRequest[]; reviewRequested: GithubPullRequest[] };
-type VercelDeployment = { id: string; name: string; url: string; state: string; target: string | null; branch: string | null; commitMessage: string | null; createdAt: number };
-type VercelSnapshot = { username: string; checkedAt: number; deployments: VercelDeployment[] };
-type CodexHookPreview = { enabled: boolean; configPath: string; fingerprint: string; configChanged: boolean; backupWillBeCreated: boolean; changes: Array<{ eventName: string; before: unknown[]; after: unknown[] }> };
+import type {
+  Shortcut,
+  PocketItem,
+  ClipboardEntry,
+  PetSkin,
+  PetAccessory,
+  FocusState,
+  FocusHistoryEntry,
+  MediaInfo,
+  AudioAppVolume,
+  Edge,
+  MenuTab,
+  SettingsTab,
+  InteractionMode,
+  HomeView,
+  UtilityPopupMode,
+  DashboardView,
+  WeatherLocation,
+  WeatherDay,
+  WeatherSnapshot,
+  GoogleEmailMessage,
+  GoogleCalendarEvent,
+  GoogleTask,
+  GoogleSnapshot,
+  GoogleAccountStatus,
+  GoogleAuthProgress,
+  DashboardNotification,
+  PetReactionSignal,
+  UtilityPopupPosition,
+  QuickChatMessage,
+  QuickChatApproval,
+  QuickChatReasoning,
+  QuickChatModel,
+  QuickChatCatalog,
+  QuickChatEvent,
+  QuickChatWebsiteRequest,
+  DisplayInfo,
+  CursorPosition,
+  LayoutUpdate,
+  CodexHookEvent,
+  CodexApproval,
+  CodexApprovalDecision,
+  CodexActivityDay,
+  CodexActivity,
+  CodexRecentActivity,
+  GithubPullRequest,
+  GithubSnapshot,
+  VercelDeployment,
+  VercelSnapshot,
+  CodexHookPreview,
+} from "./types";
 
 const DEFAULT_SHORTCUTS: Shortcut[] = [
   { id: "terminal", name: "Terminal", glyph: "⌘", targets: ["wt.exe"] },
@@ -442,7 +401,7 @@ let onboardingInteractionMode: InteractionMode = readChoice(KEYS.interactionMode
 let activeTab: MenuTab = "home";
 let activeHomeView: HomeView = "now";
 let utilityPopupMode: UtilityPopupMode | null = null;
-let dashboardView: DashboardView = readChoice(KEYS.dashboardView, ["overview", "email", "calendar", "tasks", "notifications", "weather"], "overview");
+let dashboardView: DashboardView = readChoice(KEYS.dashboardView, ["email", "calendar", "tasks", "notifications", "weather"], "email");
 let dashboardNotifications: DashboardNotification[] = readDashboardNotifications();
 let weatherLocation: WeatherLocation | null = readWeatherLocation();
 let weatherSnapshot: WeatherSnapshot | null = readWeatherSnapshot();
@@ -579,6 +538,9 @@ let petDropFeedbackTimer: number | undefined;
 let clipboardNotice = "";
 let pendingPocketValues = new Set<string>();
 let hoverCloseTimer: number | undefined;
+let hoverOpenTimer: number | undefined;
+/** Passing through the edge (browser tabs, title bars) must not open the island. */
+const HOVER_OPEN_DELAY_MS = 160;
 let geometryFrame = 0;
 let petLoveTimer: number | undefined;
 let lastPetLove = 0;
@@ -1313,14 +1275,13 @@ function currentRadius(style: CSSStyleDeclaration) {
 function setBodyPosition(body: HTMLElement, width: number, height: number) {
   const currentEdge = (body.closest<HTMLElement>(".edge-island")?.dataset.edge ?? edge) as Edge;
   const position = Math.min(1, Math.max(0, barPosition / 100));
-  const availableWidth = Math.max(0, window.innerWidth - width);
-  const availableHeight = Math.max(0, window.innerHeight - height);
+  // Resolved by the browser against the host's current size, so the body stays on the
+  // same screen pixels when the host window shrinks or grows (see set_host_collapsed).
+  const along = (size: number) => `max(0px, calc((100% - ${size}px) * ${position}))`;
 
-  body.style.left = currentEdge === "left" ? "0px" : currentEdge === "right" ? "auto" : `${availableWidth * position}px`;
+  body.style.left = currentEdge === "left" ? "0px" : currentEdge === "right" ? "auto" : along(width);
   body.style.right = currentEdge === "right" ? "0px" : "auto";
-  body.style.top = isVerticalEdge(currentEdge) || currentEdge === "top"
-    ? `${isVerticalEdge(currentEdge) ? availableHeight * position : 0}px`
-    : "auto";
+  body.style.top = isVerticalEdge(currentEdge) ? along(height) : currentEdge === "top" ? "0px" : "auto";
   body.style.bottom = currentEdge === "bottom" ? "0px" : "auto";
   body.style.transform = "none";
 }
@@ -1388,10 +1349,11 @@ function publishNativeHitBounds(body: HTMLElement) {
   const bottom = Math.max(...rects.map((rect) => rect.bottom));
   const hostWidth = window.innerWidth;
   const hostHeight = window.innerHeight;
+  const position = Math.min(1, Math.max(0, barPosition / 100));
   const hover = isVerticalEdge()
-    ? { x: edge === "right" ? hostWidth - barThickness : 0, y: (hostHeight - barLength) / 2, width: barThickness, height: barLength }
+    ? { x: edge === "right" ? hostWidth - barThickness : 0, y: Math.max(0, hostHeight - barLength) * position, width: barThickness, height: barLength }
     : {
-      x: (hostWidth - barLength) / 2,
+      x: Math.max(0, hostWidth - barLength) * position,
       y: edge === "top" ? 0 : hostHeight - barThickness,
       width: barLength,
       height: barThickness,
@@ -1490,9 +1452,106 @@ function expandedIslandSize() {
   };
 }
 
+// The host window shrinks around the collapsed island once it rests, and grows back
+// before anything needs room. Adapted from Coucou's Windows port (MIT).
+const SHRINK_COLLAPSED_HOST = true;
+const HOST_SHRINK_DELAY_MS = 420;
+const HOST_GROW_WAIT_MS = 120;
+const HOST_BLOCKING_CLASSES = [
+  "is-expanded",
+  "is-task-complete",
+  "is-approval-pending",
+  "is-codex-media-active",
+  "onboarding-open",
+  "onboarding-launch-greeting",
+  "onboarding-launch-docking",
+];
+let hostShrunk = false;
+let hostShrinkTimer: number | undefined;
+let hostGrowing: Promise<void> | null = null;
+const observedHostIslands = new WeakSet<HTMLElement>();
+
+function islandGeometryAnimating() {
+  const motion = geometryMotion;
+  return Boolean(motion && (motion.width.animating || motion.height.animating || motion.radius.animating));
+}
+
+function hostNeedsRoom(island: HTMLElement) {
+  return expanded || onboardingOpen || onboardingLaunchGreetingActive || onboardingLaunchDocking
+    || pendingCodexApprovals.length > 0
+    || HOST_BLOCKING_CLASSES.some((name) => island.classList.contains(name));
+}
+
+function cancelHostShrink() {
+  if (hostShrinkTimer === undefined) return;
+  window.clearTimeout(hostShrinkTimer);
+  hostShrinkTimer = undefined;
+}
+
+function scheduleHostShrink() {
+  cancelHostShrink();
+  if (!SHRINK_COLLAPSED_HOST || currentWindowLabel !== "main" || hostShrunk || hostGrowing) return;
+  hostShrinkTimer = window.setTimeout(() => {
+    hostShrinkTimer = undefined;
+    const island = app.querySelector<HTMLElement>(".edge-island");
+    const body = island?.querySelector<HTMLElement>(".island-body");
+    if (!island || !body || hostShrunk || hostGrowing || hostNeedsRoom(island) || islandGeometryAnimating()) return;
+    const rect = body.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    hostShrunk = true;
+    void invoke<boolean>("set_host_collapsed", { collapsed: true, width: rect.width, height: rect.height })
+      .then((changed) => { if (!changed) hostShrunk = false; })
+      .catch(() => { hostShrunk = false; });
+  }, HOST_SHRINK_DELAY_MS);
+}
+
+/** Gives the host its full size back; resolves once the page has been resized. */
+function growHost(): Promise<void> {
+  cancelHostShrink();
+  if (!hostShrunk) return hostGrowing ?? Promise.resolve();
+  hostShrunk = false;
+  const resized = new Promise<void>((resolve) => {
+    const done = () => {
+      window.removeEventListener("resize", done);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(done, HOST_GROW_WAIT_MS);
+    window.addEventListener("resize", done);
+  });
+  const growing: Promise<void> = invoke<boolean>("set_host_collapsed", { collapsed: false })
+    .then((changed) => (changed ? resized : undefined))
+    .catch(() => undefined)
+    .finally(() => { if (hostGrowing === growing) hostGrowing = null; });
+  hostGrowing = growing;
+  return growing;
+}
+
+function syncHostToIsland(island: HTMLElement) {
+  if (!island.isConnected) return;
+  if (hostNeedsRoom(island)) {
+    if (hostShrunk) void growHost();
+    else cancelHostShrink();
+    return;
+  }
+  if (!islandGeometryAnimating()) scheduleHostShrink();
+}
+
+function observeHostIsland(island: HTMLElement) {
+  if (!SHRINK_COLLAPSED_HOST || currentWindowLabel !== "main" || observedHostIslands.has(island)) return;
+  observedHostIslands.add(island);
+  new MutationObserver(() => syncHostToIsland(island)).observe(island, { attributes: true, attributeFilter: ["class"] });
+  syncHostToIsland(island);
+}
+
 function animateIsland(open: boolean) {
   const body = app.querySelector<HTMLElement>(".island-body");
   if (!body) return;
+  if (hostShrunk || hostGrowing) {
+    void growHost().then(() => animateIsland(open));
+    return;
+  }
+  cancelHostShrink();
 
   const current = geometryMotion?.body === body ? geometryMotion : undefined;
   const style = getComputedStyle(body);
@@ -1520,6 +1579,7 @@ function animateIsland(open: boolean) {
     motion.height.jump(target.height);
     motion.radius.jump(target.radius);
     setBodyGeometry(body, target.width, target.height, target.radius);
+    if (!open) scheduleHostShrink();
     return;
   }
 
@@ -1564,14 +1624,9 @@ function animateIsland(open: boolean) {
     motion.radius.step(dt, now);
     setBodyGeometry(body, motion.width.value, motion.height.value, motion.radius.value);
     if (motion.width.animating || motion.height.animating || motion.radius.animating) requestAnimationFrame(frame);
+    else if (!open) scheduleHostShrink();
   };
   requestAnimationFrame(frame);
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
-  })[character]!);
 }
 
 function getSelectedDisplayIds() {
@@ -1618,48 +1673,19 @@ function applyDisplayLayout(isExpanded = expanded) {
     positionPercent: barPosition,
     expanded: isExpanded,
   }).then(() => {
+    // The layout placed the host at its full size again.
+    hostShrunk = false;
     const body = app.querySelector<HTMLElement>(".island-body");
     if (body) {
       lastPublishedRect = undefined;
       lastPublishedHoverRect = undefined;
       publishNativeHitBounds(body);
     }
+    const island = app.querySelector<HTMLElement>(".edge-island");
+    if (island) syncHostToIsland(island);
   }).catch(() => undefined);
 }
 
-function makeId() {
-  return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-type MenuIconName = "brand" | "home" | "pet" | "panels" | "shortcuts" | "settings" | "close" | "pocket" | "clipboard" | "search" | "chevron" | "back" | "refresh" | "volume" | "previous" | "play" | "pause" | "next" | "plus" | "file" | "image" | "text";
-
-function menuIcon(name: MenuIconName) {
-  const paths: Record<MenuIconName, string> = {
-    brand: '<path d="M12 2.7 13.7 9l6.3 3-6.3 3-1.7 6.3L10.3 15 4 12l6.3-3L12 2.7Z"/><path d="M19 3v4M17 5h4M4 17v4M2 19h4"/>',
-    home: '<path d="m3.5 10 8.5-7 8.5 7v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9Z"/><path d="M9 20v-6h6v6"/>',
-    pet: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="11" r="1" fill="currentColor" stroke="none"/>',
-    panels: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11M15 9v11"/>',
-    shortcuts: '<rect x="4" y="4" width="6" height="6" rx="1.4"/><rect x="14" y="4" width="6" height="6" rx="1.4"/><rect x="4" y="14" width="6" height="6" rx="1.4"/><rect x="14" y="14" width="6" height="6" rx="1.4"/>',
-    settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
-    close: '<path d="m18 6-12 12M6 6l12 12"/>',
-    pocket: '<path d="M3 7.5h7l2 2h9v8.7a1.8 1.8 0 0 1-1.8 1.8H4.8A1.8 1.8 0 0 1 3 18.2V7.5Z"/><path d="M3 10h18"/>',
-    clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 9h6M9 13h6M9 17h3"/>',
-    search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/>',
-    chevron: '<path d="m9 18 6-6-6-6"/>',
-    back: '<path d="m15 18-6-6 6-6"/>',
-    refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6.8L20 12M4 12l2 5.2A7 7 0 0 0 18.4 15"/>',
-    volume: '<path d="M4 10v4h4l5 4V6l-5 4H4Z"/><path d="M17 9a5 5 0 0 1 0 6M19 6a9 9 0 0 1 0 12"/>',
-    previous: '<path d="M6 5v14M19 6l-9 6 9 6V6Z"/>',
-    play: '<path d="m8 5 11 7-11 7V5Z"/>',
-    pause: '<path d="M8 5v14M16 5v14"/>',
-    next: '<path d="M18 5v14M5 6l9 6-9 6V6Z"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    file: '<path d="M6 3h8l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5M8 13h8M8 17h8"/>',
-    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m21 16-5-5L5 20"/>',
-    text: '<path d="M5 5h14M5 10h14M5 15h9M5 20h12"/>',
-  };
-  return `<svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name]}</svg>`;
-}
 
 function renderPetCharacter(className = "") {
   return `
@@ -1704,62 +1730,8 @@ function renderLauncherItems(quickLimit?: number) {
     </button>`).join("");
 }
 
-function formatDuration(ms: number) {
-  const seconds = Math.ceil(ms / 1000);
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function formatMediaTime(ms: number) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const seconds = String(totalSeconds % 60).padStart(2, "0");
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`
-    : `${minutes}:${seconds}`;
-}
-
-function weatherCodeDescription(code: number) {
-  if (code === 0) return "Céu limpo";
-  if (code === 1) return "Predomínio de sol";
-  if (code === 2) return "Parcialmente nublado";
-  if (code === 3) return "Nublado";
-  if (code === 45 || code === 48) return "Neblina";
-  if ([51, 53, 55, 56, 57].includes(code)) return "Garoa";
-  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "Chuva";
-  if ([71, 73, 75, 77, 85, 86].includes(code)) return "Neve";
-  if ([95, 96, 99].includes(code)) return "Trovoada";
-  return "Condições variáveis";
-}
-
-function weatherCodeGlyph(code: number) {
-  if (code === 0 || code === 1) return "☀";
-  if (code === 2) return "◒";
-  if (code === 3 || code === 45 || code === 48) return "☁";
-  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return "∿";
-  if ([71, 73, 75, 77, 85, 86].includes(code)) return "❄";
-  if ([95, 96, 99].includes(code)) return "⚡";
-  return "○";
-}
-
 function weatherPlaceLabel(location: WeatherLocation) {
   return [location.name, location.admin1, location.country].filter(Boolean).join(", ");
-}
-
-function weatherDayLabel(date: string) {
-  const value = new Date(`${date}T12:00:00`);
-  if (!Number.isFinite(value.getTime())) return date;
-  return new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit" }).format(value).replace(".", "");
-}
-
-function relativeTime(timestamp: number) {
-  const delta = timestamp - Date.now();
-  const minutes = Math.round(delta / 60_000);
-  const formatter = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
-  if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
-  const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return formatter.format(hours, "hour");
-  return formatter.format(Math.round(hours / 24), "day");
 }
 
 function refreshDashboardPopupIfOpen() {
@@ -2067,26 +2039,6 @@ async function disconnectGoogleWorkspace() {
   }
 }
 
-function formatGoogleTime(value: string, allDay = false) {
-  const date = allDay && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(`${value}T12:00:00`)
-    : new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Horário indisponível";
-  return new Intl.DateTimeFormat("pt-BR", allDay
-    ? { weekday: "short", day: "2-digit", month: "short" }
-    : { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date).replace(".", "");
-}
-
-function localCalendarDate(value: Date) {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-}
-
-function formatGoogleDueDate(value: string) {
-  const day = value.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "Data indisponível";
-  return formatGoogleTime(day, true);
-}
-
 async function runGoogleMessageAction(message: GoogleEmailMessage, action: "read" | "archive") {
   if (action === "archive" && !window.confirm(`Arquivar “${message.subject}” no Gmail?`)) return;
   try {
@@ -2145,27 +2097,6 @@ function dashboardUnreadCount() {
 
 function dashboardNotificationIcon(kind: DashboardNotification["kind"]) {
   return kind === "email" ? "@" : kind === "calendar" ? "◷" : kind === "task" ? "✓" : kind === "weather" ? "☁" : "•";
-}
-
-function renderDashboardOverview() {
-  const notificationCount = dashboardUnreadCount();
-  const weatherSummary = weatherSnapshot
-    ? `${Math.round(weatherSnapshot.current.temperatureC)}° · ${weatherCodeDescription(weatherSnapshot.current.weatherCode)}`
-    : weatherLocation ? "Atualizando a previsão" : "Escolha uma cidade";
-  const nextEvent = googleSnapshot?.events.find((event) => event.allDay || Date.parse(event.startsAt) > Date.now());
-  const cards: Array<{ view: DashboardView; title: string; summary: string; glyph: string }> = [
-    { view: "email", title: "E-mail", summary: googleAccount.connected ? `${googleSnapshot?.unreadCount ?? 0} não lidos · ${googleAccount.email}` : "Conectar Gmail", glyph: "@" },
-    { view: "calendar", title: "Agenda", summary: nextEvent ? `${nextEvent.title} · ${formatGoogleTime(nextEvent.startsAt, nextEvent.allDay)}` : googleAccount.connected ? "Sem próximos compromissos" : "Conectar Agenda", glyph: "◷" },
-    { view: "tasks", title: "Tarefas", summary: googleAccount.connected ? `${googleSnapshot?.tasks.length ?? 0} pendentes` : "Conectar Google Tarefas", glyph: "✓" },
-    { view: "weather", title: "Clima", summary: weatherSummary, glyph: weatherSnapshot ? weatherCodeGlyph(weatherSnapshot.current.weatherCode) : "☁" },
-  ];
-  return `
-    <section class="dashboard-overview">
-      <div class="dashboard-welcome"><div class="dashboard-pet">${renderPetCharacter("dashboard-ghosty")}</div><div><span class="section-kicker">SEU DIA, DE RELANCE</span><strong>Oi, ${escapeHtml(petName)} está por aqui.</strong><small>Seus painéis ficam reunidos neste espaço.</small></div></div>
-      <div class="dashboard-overview-grid">${cards.map((card) => `<button class="dashboard-overview-card" data-action="dashboard-view" data-dashboard-view="${card.view}"><span class="dashboard-overview-glyph">${card.glyph}</span><span><strong>${card.title}</strong><small>${escapeHtml(card.summary)}</small></span><span class="dashboard-chevron">›</span></button>`).join("")}</div>
-      <button class="dashboard-notification-summary" data-action="dashboard-view" data-dashboard-view="notifications"><span class="dashboard-overview-glyph">•</span><span><strong>Notificações</strong><small>${notificationCount ? `${notificationCount} novas` : "Tudo em dia por enquanto"}</small></span><span class="dashboard-chevron">›</span></button>
-      ${weatherSnapshot ? `<small class="dashboard-attribution">Dados meteorológicos por Open-Meteo</small>` : ""}
-    </section>`;
 }
 
 function renderDashboardConnectView(title: string, description: string, glyph: string) {
@@ -2239,7 +2170,6 @@ function renderDashboardNotifications() {
 }
 
 function renderDashboardPanel() {
-  if (dashboardView === "overview") return renderDashboardOverview();
   if (dashboardView === "email") return renderGoogleEmailPanel();
   if (dashboardView === "calendar") return renderGoogleCalendarPanel();
   if (dashboardView === "tasks") return renderGoogleTasksPanel();
@@ -2248,15 +2178,14 @@ function renderDashboardPanel() {
 }
 
 function renderDashboardPopup() {
-  const views: Array<{ id: DashboardView; label: string; glyph: string }> = [
-    { id: "overview", label: "Hoje", glyph: "◎" },
-    { id: "email", label: "E-mail", glyph: "@" },
-    { id: "calendar", label: "Agenda", glyph: "◷" },
-    { id: "tasks", label: "Tarefas", glyph: "✓" },
-    { id: "notifications", label: "Avisos", glyph: "•" },
-    { id: "weather", label: "Clima", glyph: "☁" },
+  const views: Array<{ id: DashboardView; label: string; icon: MenuIconName }> = [
+    { id: "email", label: "E-mail", icon: "mail" },
+    { id: "calendar", label: "Agenda", icon: "calendar" },
+    { id: "tasks", label: "Tarefas", icon: "check" },
+    { id: "notifications", label: "Avisos", icon: "bell" },
+    { id: "weather", label: "Clima", icon: "cloud" },
   ];
-  return `<section class="dashboard-page" data-dashboard-view="${dashboardView}"><nav class="dashboard-tabs" aria-label="Painéis">${views.map((view) => `<button type="button" data-action="dashboard-view" data-dashboard-view="${view.id}" class="${dashboardView === view.id ? "is-active" : ""}" aria-current="${dashboardView === view.id ? "page" : "false"}"><span>${view.glyph}</span><small>${view.label}</small>${view.id === "notifications" && dashboardUnreadCount() ? `<i>${Math.min(99, dashboardUnreadCount())}</i>` : ""}</button>`).join("")}</nav><div class="dashboard-panel">${renderDashboardPanel()}</div></section>`;
+  return `<section class="dashboard-page" data-dashboard-view="${dashboardView}"><nav class="dashboard-tabs" aria-label="Painéis">${views.map((view) => `<button type="button" data-action="dashboard-view" data-dashboard-view="${view.id}" class="${dashboardView === view.id ? "is-active" : ""}" aria-current="${dashboardView === view.id ? "page" : "false"}"><span>${menuIcon(view.icon)}</span><small>${view.label}</small>${view.id === "notifications" && dashboardUnreadCount() ? `<i>${Math.min(99, dashboardUnreadCount())}</i>` : ""}</button>`).join("")}</nav><div class="dashboard-panel">${renderDashboardPanel()}</div></section>`;
 }
 
 function refreshDashboardIfVisible() {
@@ -2276,6 +2205,7 @@ function refreshDashboardIfVisible() {
     badge.textContent = String(Math.min(99, unreadCount));
     if (!unreadCount) badge.remove();
   }
+  refreshHomeStatusUi();
   if (activeTab !== "panels") return;
   const tabView = app.querySelector<HTMLElement>(".tab-view");
   if (!tabView) return;
@@ -2292,12 +2222,12 @@ function homeViewLabel(view: HomeView = activeHomeView) {
 
 function renderHomePage() {
   const status = homeStatusPresentation();
-  const views: Array<{ id: HomeView; label: string; accent: string; glyph: string }> = [
-    { id: "now", label: "Agora", accent: "#b5bac3", glyph: "●" },
-    { id: "activity", label: "Codex", accent: "#8bc7e7", glyph: "✦" },
-    { id: "github", label: "GitHub", accent: "#f4505e", glyph: "⌘" },
-    { id: "vercel", label: "Vercel", accent: "#7c5cff", glyph: "▲" },
-    { id: "media", label: "Mídia", accent: "#22d3ee", glyph: "♫" },
+  const views: Array<{ id: HomeView; label: string; accent: string; icon: MenuIconName }> = [
+    { id: "now", label: "Agora", accent: "var(--accent-now)", icon: "now" },
+    { id: "media", label: "Mídia", accent: "var(--accent-media)", icon: "music" },
+    { id: "activity", label: "Codex", accent: "var(--accent-codex)", icon: "codex" },
+    { id: "github", label: "GitHub", accent: "var(--accent-github)", icon: "github" },
+    { id: "vercel", label: "Vercel", accent: "var(--accent-vercel)", icon: "vercel" },
   ];
   const content = activeHomeView === "activity" ? renderHomeActivity()
     : activeHomeView === "github" || activeHomeView === "vercel" ? renderHomeIntegrations()
@@ -2314,7 +2244,7 @@ function renderHomePage() {
       </section>
       ${activeHomeView === "media" ? renderHomeMasterVolume() : ""}
       <nav class="coucou-pill-card" aria-label="Mudar cartão em destaque" ${activeHomeView === "media" && volumeMixerOpen ? 'aria-hidden="true" inert' : ""}>
-        ${views.filter(({ id }) => id !== activeHomeView).map(({ id, label, accent, glyph }) => `<button class="coucou-pill" type="button" style="--pill-accent:${accent}" data-action="home-view" data-home-view="${id}" aria-label="Mostrar ${label}"><span class="coucou-pill-glyph" aria-hidden="true">${glyph}</span><span>${label}</span></button>`).join("")}
+        ${views.map(({ id, label, accent, icon }) => `<button class="coucou-pill ${id === activeHomeView ? "is-active" : ""}" type="button" style="--pill-accent:${accent}" data-action="home-view" data-home-view="${id}" aria-pressed="${id === activeHomeView}" aria-label="Mostrar ${label}"><span class="coucou-pill-glyph" aria-hidden="true">${menuIcon(icon)}</span><span>${label}</span></button>`).join("")}
       </nav>
       ${activeHomeView === "media" ? renderAudioMixerPanel() : ""}
     </div>`;
@@ -2330,17 +2260,52 @@ function renderHomeMasterVolume() {
 
 function renderHomeNow(status: ReturnType<typeof homeStatusPresentation>) {
   return `<div class="coucou-card-copy home-spotlight-card" data-home-status="${status.state}">
-    <div class="coucou-card-heading"><i aria-hidden="true"></i><strong>Ghosty</strong><span>Agora</span></div>
-    <div class="coucou-card-status" data-home-status-label><i aria-hidden="true"></i><span>${status.label}</span></div>
+    <div class="coucou-card-heading" data-home-status-label><i aria-hidden="true"></i><strong>${escapeHtml(petName)}</strong><span>${status.label}</span></div>
     <strong class="coucou-card-title" data-home-status-title>${status.title}</strong>
-    <small class="coucou-card-description" data-home-status-copy>${status.description}</small>
+    <div class="home-glance" data-home-glance>${renderHomeGlance(status)}</div>
     <div class="coucou-card-actions">
-      <button data-action="open-utility-popup" data-popup="focus">Foco</button>
-      <button data-action="open-panels-tab">Painéis</button>
-      <button data-action="open-utility-popup" data-popup="pocket">Bolso</button>
-      <button data-action="open-utility-popup" data-popup="clipboard">Prancheta</button>
+      <button data-action="open-utility-popup" data-popup="focus">${menuIcon("focus")}<span>Foco</span></button>
+      <button data-action="open-utility-popup" data-popup="pocket">${menuIcon("pocket")}<span>Bolso</span></button>
+      <button data-action="open-utility-popup" data-popup="clipboard">${menuIcon("clipboard")}<span>Prancheta</span></button>
+      <button data-action="open-panels-tab">${menuIcon("panels")}<span>Painéis</span></button>
     </div>
   </div>`;
+}
+
+type HomeGlanceItem = { icon: MenuIconName; text: string; action: "panels" | "media"; view?: DashboardView };
+
+/** Real data for the Home "Agora" card, most time-sensitive first. */
+function homeGlanceItems(): HomeGlanceItem[] {
+  const items: HomeGlanceItem[] = [];
+  const nextEvent = googleSnapshot?.events.find((event) => event.allDay || Date.parse(event.startsAt) > Date.now());
+  if (nextEvent) items.push({ icon: "calendar", text: `${formatGoogleTime(nextEvent.startsAt, nextEvent.allDay)} · ${nextEvent.title}`, action: "panels", view: "calendar" });
+  const unread = googleSnapshot?.unreadCount ?? 0;
+  if (googleAccount.connected && unread > 0) items.push({ icon: "mail", text: unread === 1 ? "1 e-mail não lido" : `${unread} e-mails não lidos`, action: "panels", view: "email" });
+  if (mediaInfo.title) items.push({ icon: "music", text: `${mediaInfo.playing ? "Tocando" : "Pausado"} · ${mediaInfo.title}${mediaInfo.artist ? ` — ${mediaInfo.artist}` : ""}`, action: "media" });
+  const notifications = dashboardUnreadCount();
+  if (notifications > 0) items.push({ icon: "bell", text: notifications === 1 ? "1 aviso novo" : `${notifications} avisos novos`, action: "panels", view: "notifications" });
+  if (weatherSnapshot) items.push({ icon: "cloud", text: `${Math.round(weatherSnapshot.current.temperatureC)}° · ${weatherCodeDescription(weatherSnapshot.current.weatherCode)}`, action: "panels", view: "weather" });
+  return items;
+}
+
+function renderHomeGlance(status: ReturnType<typeof homeStatusPresentation>) {
+  // Codex approval/activity is the only thing more urgent than the day overview.
+  if (status.state === "approval" || status.state === "active") return `<small class="coucou-card-description">${status.description}</small>`;
+  const items = homeGlanceItems().slice(0, 2);
+  if (items.length === 0) return `<small class="coucou-card-description">${status.description}</small>`;
+  return items.map((item) => `<button class="home-glance-row" type="button" data-glance-action="${item.action}" ${item.view ? `data-dashboard-view="${item.view}"` : ""}>${menuIcon(item.icon)}<span>${escapeHtml(item.text)}</span></button>`).join("");
+}
+
+function bindHomeGlance(container: ParentNode) {
+  container.querySelectorAll<HTMLButtonElement>("[data-glance-action]").forEach((button) => button.addEventListener("click", () => {
+    if (button.dataset.glanceAction === "media") {
+      updateActiveHomeView("media");
+      return;
+    }
+    const view = button.dataset.dashboardView as DashboardView | undefined;
+    if (view) selectDashboardView(view);
+    openPanelsInBar();
+  }));
 }
 
 function renderHomeIntegrations() {
@@ -2401,7 +2366,7 @@ function homeStatusPresentation() {
   if (pendingCodexApprovals.length > 0) {
     return {
       state: "approval",
-      label: "AÇÃO NECESSÁRIA",
+      label: "Ação necessária",
       title: "Aprovação pendente",
       description: "Revise o pedido do Codex para continuar.",
     };
@@ -2409,7 +2374,7 @@ function homeStatusPresentation() {
   if (codexTaskRunning) {
     return {
       state: "active",
-      label: "CODEX EM ATIVIDADE",
+      label: "Codex em atividade",
       title: "O Codex está trabalhando",
       description: "A tarefa segue em andamento no seu computador.",
     };
@@ -2417,17 +2382,22 @@ function homeStatusPresentation() {
   if (updatesPaused) {
     return {
       state: "paused",
-      label: "INTEGRAÇÕES PAUSADAS",
-      title: "Tudo tranquilo por aqui.",
-      description: "GitHub e Vercel estão pausados; mídia e atalhos seguem prontos.",
+      label: "Atualizações pausadas",
+      title: homeGreeting(),
+      description: "Integrações pausadas na bandeja; mídia e atalhos seguem prontos.",
     };
   }
   return {
     state: "ready",
-    label: "TUDO PRONTO",
-    title: "Tudo tranquilo por aqui.",
-    description: "Música, volume e atalhos sempre à mão.",
+    label: "Tudo pronto",
+    title: homeGreeting(),
+    description: "Conecte Google ou escolha uma cidade em Painéis para ver seu dia aqui.",
   };
+}
+
+function homeGreeting() {
+  const hour = new Date().getHours();
+  return hour < 5 ? "Boa madrugada." : hour < 12 ? "Bom dia." : hour < 18 ? "Boa tarde." : "Boa noite.";
 }
 
 function refreshHomeStatusUi() {
@@ -2435,15 +2405,16 @@ function refreshHomeStatusUi() {
   if (!card) return;
   const status = homeStatusPresentation();
   card.dataset.homeStatus = status.state;
-  if (card.parentElement?.parentElement?.classList.contains("coucou-focus-card")) {
-    card.parentElement.parentElement.dataset.homeStatus = status.state;
-  }
+  card.closest<HTMLElement>(".coucou-focus-card")?.setAttribute("data-home-status", status.state);
   const label = card.querySelector<HTMLElement>("[data-home-status-label] span");
   const title = card.querySelector<HTMLElement>("[data-home-status-title]");
-  const description = card.querySelector<HTMLElement>("[data-home-status-copy]");
+  const glance = card.querySelector<HTMLElement>("[data-home-glance]");
   if (label) label.textContent = status.label;
   if (title) title.textContent = status.title;
-  if (description) description.textContent = status.description;
+  if (glance) {
+    glance.innerHTML = renderHomeGlance(status);
+    bindHomeGlance(glance);
+  }
 }
 
 function renderPetPage() {
@@ -2463,9 +2434,7 @@ function renderPetPage() {
           <p>Um cantinho para o que você está fazendo agora.</p>
           <div class="pet-side-status" data-mood="${mood}"><i></i><span>${escapeHtml(petMoodLabel(mood))}</span></div>
           <div class="pet-side-actions">
-            <button data-action="open-utility-popup" data-popup="pocket">Abrir Bolso</button>
             <button data-action="open-utility-popup" data-popup="customize">Personalizar</button>
-            <button data-action="open-utility-popup" data-popup="focus">Iniciar Foco</button>
           </div>
         </div>
       </section>
@@ -2830,7 +2799,7 @@ function bindDashboardPopup(popup: HTMLElement) {
   popup.querySelectorAll<HTMLButtonElement>("[data-action=dashboard-view]").forEach((button) => {
     button.addEventListener("click", () => {
       const view = button.dataset.dashboardView;
-      if (view === "overview" || view === "email" || view === "calendar" || view === "tasks" || view === "notifications" || view === "weather") selectDashboardView(view);
+      if (view === "email" || view === "calendar" || view === "tasks" || view === "notifications" || view === "weather") selectDashboardView(view);
     });
   });
   popup.querySelector("[data-action=dashboard-open-settings]")?.addEventListener("click", () => openSettingsWindow("panels"));
@@ -3549,10 +3518,15 @@ function openSettingsWindow(tab: SettingsTab = "general") {
   });
 }
 
+/** Hides this auxiliary window and lets WebView2 trim its memory while hidden. */
+function hideAuxiliaryWindow() {
+  return invoke("hide_auxiliary_window").catch(() => getCurrentWindow().hide()).catch(() => undefined);
+}
+
 function openPanelsInBar() {
   if (currentWindowLabel === "settings-window" || currentWindowLabel === "utility-popup") {
     localStorage.setItem(KEYS.openPanelsRequest, makeId());
-    void getCurrentWindow().hide().catch(() => undefined);
+    void hideAuxiliaryWindow();
     return;
   }
   updateActiveTab("panels");
@@ -3562,18 +3536,6 @@ function openPanelsInBar() {
 function refreshShortcutsScreen() {
   if (currentWindowLabel === "settings-window") renderSettingsWindow();
   else openSettingsWindow("shortcuts");
-}
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1_024) return `${bytes} B`;
-  const units = ["KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = -1;
-  do {
-    value /= 1_024;
-    unit += 1;
-  } while (value >= 1_024 && unit < units.length - 1);
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
 async function askAboutPocketItem(item: PocketItem) {
@@ -3604,14 +3566,14 @@ async function closeUtilityPopup() {
   utilityPopupMode = null;
   localStorage.removeItem(KEYS.utilityPopup);
   renderUtilityPopup();
-  await getCurrentWindow().hide().catch(() => undefined);
+  await hideAuxiliaryWindow();
 }
 
 function startUtilityPopupWindow() {
   if (localStorage.getItem(KEYS.utilityPopup) === "dashboard") {
     localStorage.removeItem(KEYS.utilityPopup);
     localStorage.setItem(KEYS.openPanelsRequest, makeId());
-    void getCurrentWindow().hide().catch(() => undefined);
+    void hideAuxiliaryWindow();
     return;
   }
   renderUtilityPopup();
@@ -4573,7 +4535,14 @@ async function refreshMediaInfo() {
   }
   mediaUpdatedAt = Date.now();
   paintMediaInfo();
+  const glanceKey = `${mediaInfo.title}|${mediaInfo.playing}`;
+  if (glanceKey !== lastMediaGlanceKey) {
+    lastMediaGlanceKey = glanceKey;
+    refreshHomeStatusUi();
+  }
 }
+
+let lastMediaGlanceKey = "";
 
 function currentMediaPosition() {
   const elapsed = mediaInfo.playing ? Math.max(0, Date.now() - mediaUpdatedAt) : 0;
@@ -4870,6 +4839,7 @@ function bindTabContent(tabView: HTMLElement) {
     if (view === "now" || view === "activity" || view === "github" || view === "vercel" || view === "media") updateActiveHomeView(view);
   }));
   tabView.querySelector<HTMLButtonElement>("[data-action=open-panels-tab]")?.addEventListener("click", openPanelsInBar);
+  bindHomeGlance(tabView);
   if (activeTab === "panels") bindDashboardPopup(tabView);
   tabView.querySelector<HTMLButtonElement>("[data-action=open-shortcuts]")?.addEventListener("click", () => openSettingsWindow("shortcuts"));
   const volumeSlider = tabView.querySelector<HTMLInputElement>("#volume");
@@ -5416,7 +5386,7 @@ function renderSettingsWindow() {
     renderSettingsWindow();
   }));
   app.querySelector<HTMLButtonElement>("[data-action=settings-window-close]")?.addEventListener("click", () => {
-    void getCurrentWindow().hide().catch(() => undefined);
+    void hideAuxiliaryWindow();
   });
   if (settingsTab === "shortcuts") {
     const shortcutContent = app.querySelector<HTMLElement>(".settings-content");
@@ -5449,7 +5419,24 @@ function setExpanded(value: boolean) {
     window.clearTimeout(hoverCloseTimer);
     hoverCloseTimer = undefined;
   }
+  cancelHoverOpen();
   animateIsland(value);
+}
+
+function cancelHoverOpen() {
+  if (hoverOpenTimer === undefined) return;
+  window.clearTimeout(hoverOpenTimer);
+  hoverOpenTimer = undefined;
+}
+
+function requestHoverOpen() {
+  if (expanded || hoverOpenTimer !== undefined) return;
+  hoverOpenTimer = window.setTimeout(() => {
+    hoverOpenTimer = undefined;
+    if (interactionMode !== "hover" || expanded) return;
+    const body = app.querySelector<HTMLElement>(".island-body");
+    if (body?.matches(":hover") || wasPointerInNativeIsland) setExpanded(true);
+  }, HOVER_OPEN_DELAY_MS);
 }
 
 function scheduleClose() {
@@ -5848,15 +5835,17 @@ function render() {
   }
   syncCodexMediaBubble(island);
   publishNativeHitBounds(body);
+  observeHostIsland(island);
   body.addEventListener("pointerenter", () => {
     if (hoverCloseTimer !== undefined) {
       window.clearTimeout(hoverCloseTimer);
       hoverCloseTimer = undefined;
     }
     if (interactionMode !== "hover") return;
-    setExpanded(true);
+    requestHoverOpen();
   });
   body.addEventListener("pointerleave", () => {
+    cancelHoverOpen();
     const pet = app.querySelector<HTMLElement>(".tab-view .pet");
     if (pet) petMotionEngines.get(pet)?.lookAt(0, 0);
     if (interactionMode === "hover" && expanded) scheduleClose();
@@ -5997,7 +5986,8 @@ async function startMainWindow() {
     const mediaViewOpen = expanded && activeTab === "home" && activeHomeView === "media";
     const now = Date.now();
     if (now >= nextMediaRefreshAt) {
-      nextMediaRefreshAt = now + (mediaViewOpen ? 1500 : 4000);
+      // Each refresh still costs a PowerShell process, so idle players are checked less often.
+      nextMediaRefreshAt = now + (mediaViewOpen ? 1500 : mediaInfo.playing ? 4000 : 8000);
       void refreshMediaInfo();
     }
     paintCollapsedMediaProgress();
@@ -6042,10 +6032,10 @@ async function startSettingsWindow() {
   const currentWindow = getCurrentWindow();
   void currentWindow.onCloseRequested((event) => {
     event.preventDefault();
-    void currentWindow.hide().catch(() => undefined);
+    void hideAuxiliaryWindow();
   });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") void currentWindow.hide().catch(() => undefined);
+    if (event.key === "Escape") void hideAuxiliaryWindow();
   });
   void refreshAutoStartStatus();
   void checkForAppUpdate();
@@ -6090,9 +6080,10 @@ void listen<CursorPosition>("edge-ghosty-cursor", ({ payload }) => {
       window.clearTimeout(hoverCloseTimer);
       hoverCloseTimer = undefined;
     }
-    if (interactionMode === "hover" && !expanded && !pointerOnApproval) setExpanded(true);
-  } else if (!inIsland && wasPointerInNativeIsland && expanded) {
-    if (interactionMode === "hover") scheduleClose();
+    if (interactionMode === "hover" && !expanded && !pointerOnApproval) requestHoverOpen();
+  } else {
+    cancelHoverOpen();
+    if (wasPointerInNativeIsland && expanded && interactionMode === "hover") scheduleClose();
   }
   wasPointerInNativeIsland = inIsland;
 });
@@ -6347,7 +6338,7 @@ window.addEventListener("storage", (event) => {
     return;
   }
   if (event.key === KEYS.dashboardView) {
-    dashboardView = readChoice(KEYS.dashboardView, ["overview", "email", "calendar", "tasks", "notifications", "weather"], "overview");
+    dashboardView = readChoice(KEYS.dashboardView, ["email", "calendar", "tasks", "notifications", "weather"], "email");
     refreshDashboardIfVisible();
     return;
   }
@@ -6452,9 +6443,42 @@ window.addEventListener("storage", (event) => {
   else if (event.key === KEYS.shortcuts) updateActiveTab(activeTab);
   paintFocusTimer();
 });
-if (currentWindowLabel === "main") mainStartupPromise = startMainWindow();
-else if (currentWindowLabel === "utility-popup") startUtilityPopupWindow();
-else if (currentWindowLabel === "settings-window") void startSettingsWindow();
+/**
+ * WebView2 can report a devicePixelRatio other than the window's scale (Windows text
+ * size, mixed-DPI monitors). Rust reads our CSS px as logical px, so the zoom is
+ * corrected first, then the page waits briefly for the ratio to settle.
+ */
+async function fitWebviewZoom() {
+  const before = window.devicePixelRatio || 1;
+  const changed = await invoke<boolean>("fit_webview_zoom", { devicePixelRatio: before }).catch(() => false);
+  if (!changed) return;
+  for (let attempt = 0; attempt < 20 && window.devicePixelRatio === before; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 25));
+  }
+}
+
+/** A resolution query only matches its own ratio, so it is renewed after each change. */
+function watchDevicePixelRatio() {
+  window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => {
+    watchDevicePixelRatio();
+    void fitWebviewZoom().then(refreshHostGeometry);
+  }, { once: true });
+}
+
+/** Republishes the hitbox after the host was resized or re-zoomed. */
+function refreshHostGeometry() {
+  const body = app.querySelector<HTMLElement>(".island-body");
+  if (!body) return;
+  positionCodexMediaBubble(body);
+  publishNativeHitBounds(body);
+}
+
+if (currentWindowLabel === "main") window.addEventListener("resize", refreshHostGeometry);
+const zoomReady = fitWebviewZoom().finally(watchDevicePixelRatio);
+
+if (currentWindowLabel === "main") mainStartupPromise = zoomReady.then(startMainWindow);
+else if (currentWindowLabel === "utility-popup") void zoomReady.then(startUtilityPopupWindow);
+else if (currentWindowLabel === "settings-window") void zoomReady.then(startSettingsWindow);
 else {
   render();
   bindNativeFileDrop();

@@ -375,7 +375,7 @@ fn add_ghosty_groups(config: &mut Value, command: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn codex_hooks_enabled(app: AppHandle) -> Result<bool, String> {
     let paths = bridge_paths(&app)?;
     if paths.disabled.exists() {
@@ -388,7 +388,7 @@ pub fn codex_hooks_enabled(app: AppHandle) -> Result<bool, String> {
     Ok(has_ghosty_group(&config))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn codex_hooks_review_state(app: AppHandle) -> Result<CodexHookReviewState, String> {
     let paths = bridge_paths(&app)?;
     if paths.disabled.exists() {
@@ -406,7 +406,7 @@ pub fn codex_hooks_review_state(app: AppHandle) -> Result<CodexHookReviewState, 
     Ok(CodexHookReviewState { enabled: true, needs_review })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn codex_hooks_preview(app: AppHandle, enabled: bool) -> Result<CodexHookPreview, String> {
     let paths = bridge_paths(&app)?;
     let (contents, exists) = read_config_snapshot(&paths.config)?;
@@ -422,7 +422,7 @@ pub fn codex_hooks_preview(app: AppHandle, enabled: bool) -> Result<CodexHookPre
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_codex_hooks_change(
     app: AppHandle,
     enabled: bool,
@@ -504,7 +504,7 @@ fn unix_time_ms() -> u64 {
         .unwrap_or_default()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn drain_codex_events(app: AppHandle) -> Result<Vec<CodexHookEvent>, String> {
     let paths = bridge_paths(&app)?;
     if paths.disabled.exists() || !paths.events.exists() {
@@ -547,7 +547,7 @@ pub fn drain_codex_events(app: AppHandle) -> Result<Vec<CodexHookEvent>, String>
     Ok(events)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_codex_approval(
     app: AppHandle,
     request_id: String,

@@ -1,0 +1,111 @@
+/** Shared data shapes for the frontend (persisted state, Tauri payloads, UI views). */
+
+import type { PetState } from "./pet-motion";
+
+export type Shortcut = { id: string; name: string; glyph: string; targets: string[]; action?: "focus"; custom?: boolean };
+export type PocketItem = { id: string; name: string; kind: "file" | "image" | "text"; value: string; addedAt: number; truncated?: boolean };
+export type ClipboardEntry = { id: string; text: string; addedAt: number; pinned?: boolean };
+export type PetSkin = "pearl" | "smoke" | "midnight" | "mint" | "coral" | "lavender";
+export type PetAccessory = "none" | "star" | "bow" | "halo" | "leaf" | "crown";
+export type FocusState = { durationMs: number; remainingMs: number; endsAt: number; running: boolean; startedAt: number };
+export type FocusHistoryEntry = { id: string; startedAt: number; endedAt: number; durationMs: number; completed: boolean };
+export type MediaInfo = {
+  title: string;
+  artist: string;
+  playing: boolean;
+  source: string;
+  trackId: string;
+  artworkDataUrl: string;
+  positionMs: number;
+  durationMs: number;
+  canSeek: boolean;
+};
+export type AudioAppVolume = { processId: number; name: string; volume: number };
+export type Edge = "left" | "right" | "top" | "bottom";
+export type MenuTab = "home" | "pet" | "panels";
+export type SettingsTab = "general" | "shortcuts" | "panels";
+export type InteractionMode = "hover" | "click";
+export type HomeView = "now" | "activity" | "github" | "vercel" | "media";
+export type UtilityPopupMode = "focus" | "focus-summary" | "codex-activity" | "pocket" | "customize" | "clipboard" | "dashboard" | "chat";
+export type DashboardView = "email" | "calendar" | "tasks" | "notifications" | "weather";
+export type WeatherLocation = {
+  id: number | null;
+  name: string;
+  admin1: string | null;
+  country: string | null;
+  countryCode: string | null;
+  latitude: number;
+  longitude: number;
+  timezone: string | null;
+};
+export type WeatherDay = { date: string; weatherCode: number; minC: number; maxC: number; precipitationProbability: number | null };
+export type WeatherSnapshot = {
+  location: WeatherLocation;
+  current: { temperatureC: number; feelsLikeC: number; relativeHumidity: number; weatherCode: number; windSpeedKmh: number; precipitationMm: number; isDay: boolean };
+  days: WeatherDay[];
+  checkedAt: number;
+};
+export type GoogleEmailMessage = { id: string; threadId: string; subject: string; sender: string; receivedAt: number; webUrl: string };
+export type GoogleCalendarEvent = { id: string; title: string; startsAt: string; endsAt: string | null; allDay: boolean; location: string | null; webUrl: string | null; joinUrl: string | null };
+export type GoogleTask = { id: string; listId: string; listTitle: string; title: string; dueAt: string | null };
+export type GoogleSnapshot = { email: string; checkedAt: number; unreadCount: number; messages: GoogleEmailMessage[]; events: GoogleCalendarEvent[]; tasks: GoogleTask[] };
+export type GoogleAccountStatus = { connected: boolean; email: string | null; configured: boolean };
+export type GoogleAuthProgress = { status: "idle" | "waiting" | "connected" | "error"; email: string | null; message: string | null };
+export type DashboardNotification = {
+  id: string;
+  kind: "email" | "calendar" | "task" | "weather" | "system";
+  title: string;
+  body: string;
+  occurredAt: number;
+  read: boolean;
+  target?: string;
+};
+export type PetReactionSignal = { id: string; state: PetState; detail: string; until: number };
+export type UtilityPopupPosition = { x: number; y: number };
+export type QuickChatMessage = { id: string; role: "user" | "assistant"; text: string; pending?: boolean };
+export type QuickChatApproval = { requestId: number | string; method: string; params: Record<string, unknown>; preview?: string };
+export type QuickChatReasoning = { reasoningEffort: string; description?: string };
+export type QuickChatModel = { id: string; displayName: string; supportedReasoningEfforts: QuickChatReasoning[]; defaultReasoningEffort?: string };
+export type QuickChatCatalog = { authenticated: boolean; models: QuickChatModel[] };
+export type QuickChatEvent = { method: string; params?: Record<string, unknown>; requestId?: number | string };
+export type QuickChatWebsiteRequest = { siteName: string; url: string | null; continuation?: string };
+export type DisplayInfo = {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  isPrimary: boolean;
+};
+export type CursorPosition = { x: number; y: number; inside: boolean; dragging: boolean };
+export type LayoutUpdate = {
+  edge: Edge;
+  barLength: number;
+  barThickness: number;
+  positionPercent: number;
+  closeDelay: number;
+  allDisplays: boolean;
+  selectedDisplayIds: string[];
+  displayIds: string[];
+  activeLabel: string;
+  expanded: boolean;
+};
+export type CodexHookEvent = {
+  eventName: string;
+  occurredAt: number;
+  toolName: string | null;
+  agentType: string | null;
+  approvalId: string | null;
+  approvalDescription: string | null;
+  approvalExpiresAt: number | null;
+  sessionId?: string | null;
+};
+export type CodexApproval = { requestId: string; toolName: string; description: string; expiresAt: number };
+export type CodexApprovalDecision = "allow" | "deny";
+export type CodexActivityDay = { sessions: number; completed: number; interrupted: number; toolCalls: number; approvals: number; activeMs: number };
+export type CodexActivity = Record<string, CodexActivityDay>;
+export type CodexRecentActivity = { eventName: string; occurredAt: number; toolName: string | null; agentType: string | null };
+export type GithubPullRequest = { title: string; repository: string; number: number; url: string; draft: boolean; ciStatus: string | null };
+export type GithubSnapshot = { login: string; checkedAt: number; authored: GithubPullRequest[]; reviewRequested: GithubPullRequest[] };
+export type VercelDeployment = { id: string; name: string; url: string; state: string; target: string | null; branch: string | null; commitMessage: string | null; createdAt: number };
+export type VercelSnapshot = { username: string; checkedAt: number; deployments: VercelDeployment[] };
+export type CodexHookPreview = { enabled: boolean; configPath: string; fingerprint: string; configChanged: boolean; backupWillBeCreated: boolean; changes: Array<{ eventName: string; before: unknown[]; after: unknown[] }> };

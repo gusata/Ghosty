@@ -1,14 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use std::os::windows::process::CommandExt;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
 use tauri::window::Monitor;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow};
-use windows::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HGLOBAL, POINT};
+use windows::Win32::Foundation::{CloseHandle, GlobalFree, HANDLE, HGLOBAL};
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{
     eConsole, eRender, AudioSessionStateExpired, IAudioSessionControl2,
@@ -29,12 +26,12 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    keybd_event, GetAsyncKeyState, KEYEVENTF_KEYUP, VK_LBUTTON, VK_MEDIA_NEXT_TRACK,
+    keybd_event, KEYEVENTF_KEYUP, VK_MEDIA_NEXT_TRACK,
     VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SW_SHOWNORMAL,
+    SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SW_SHOWNORMAL,
 };
 use windows::core::{Interface, PCWSTR, PWSTR};
 
@@ -47,6 +44,9 @@ mod vercel;
 mod weather;
 mod google_workspace;
 mod tray;
+mod island_host;
+
+use island_host::{CursorState, HostLayout};
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -133,15 +133,6 @@ struct PocketFileMetadata {
     size_bytes: u64,
 }
 
-#[derive(Default)]
-struct CursorState {
-    rects: Arc<Mutex<HashMap<String, IslandRect>>>,
-    hover_rects: Arc<Mutex<HashMap<String, IslandRect>>>,
-    ignoring: Arc<Mutex<HashMap<String, bool>>>,
-}
-
-const CURSOR_HIT_MARGIN: f64 = 14.0;
-
 #[derive(Clone, Copy)]
 enum Edge {
     Left,
@@ -162,7 +153,7 @@ impl Edge {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn system_volume(value: u8) -> Result<u8, String> {
     let value = value.min(100);
     unsafe {
@@ -183,7 +174,7 @@ fn system_volume(value: u8) -> Result<u8, String> {
     Ok(value)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_system_volume() -> Result<u8, String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -263,7 +254,7 @@ fn audio_process_name(process_id: u32) -> String {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_app_volumes() -> Result<Vec<AudioAppVolume>, String> {
     unsafe {
         let manager = default_audio_session_manager()?;
@@ -297,7 +288,7 @@ fn get_app_volumes() -> Result<Vec<AudioAppVolume>, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_app_volume(process_id: u32, value: u8) -> Result<u8, String> {
     if process_id == 0 || process_id == std::process::id() {
         return Err("Esse processo não pode ser ajustado pelo mixer.".to_string());
@@ -391,7 +382,7 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn media_control(action: String) -> Result<(), String> {
     let key = match action.as_str() {
         "play-pause" => VK_MEDIA_PLAY_PAUSE,
@@ -406,7 +397,7 @@ fn media_control(action: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_media_info(known_track_id: Option<String>) -> MediaInfo {
     const SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
@@ -491,7 +482,7 @@ if ($null -ne $playback.Controls) { $canSeek = [bool]$playback.Controls.IsPlayba
     default_media_info()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn seek_media_position(position_ms: u64) -> Result<(), String> {
     const SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
@@ -531,7 +522,7 @@ if (-not $success) { exit 4 }
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     if targets.is_empty() {
         return Err("adicione pelo menos um aplicativo, arquivo ou endereço".to_string());
@@ -556,7 +547,7 @@ fn open_targets(targets: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pocket_file_metadata(path: String) -> Result<PocketFileMetadata, String> {
     if path.encode_utf16().count() > 32_767 {
         return Err("O caminho do arquivo excede o limite do Windows.".to_string());
@@ -569,7 +560,7 @@ fn pocket_file_metadata(path: String) -> Result<PocketFileMetadata, String> {
     Ok(PocketFileMetadata { size_bytes: metadata.len() })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn run_shortcut(name: String) -> Result<(), String> {
     let target = match name.as_str() {
         "Terminal" => ("wt.exe", ""),
@@ -590,7 +581,7 @@ fn run_shortcut(name: String) -> Result<(), String> {
 const AUTOSTART_REGISTRY_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_REGISTRY_VALUE: &str = "Edge Ghosty";
 
-#[tauri::command]
+#[tauri::command(async)]
 fn is_autostart_enabled() -> Result<bool, String> {
     let output = Command::new("reg.exe")
         .args(["query", AUTOSTART_REGISTRY_KEY, "/v", AUTOSTART_REGISTRY_VALUE])
@@ -600,7 +591,7 @@ fn is_autostart_enabled() -> Result<bool, String> {
     Ok(output.status.success())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
     if !enabled {
         if !is_autostart_enabled()? {
@@ -678,134 +669,6 @@ fn list_displays(window: WebviewWindow) -> Result<Vec<DisplayInfo>, String> {
 
 fn logical_to_physical(value: u32, scale_factor: f64) -> u32 {
     (f64::from(value) * scale_factor).round().max(1.0) as u32
-}
-
-#[tauri::command]
-fn set_island_rect(
-    window: WebviewWindow,
-    state: State<CursorState>,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    hover_x: f64,
-    hover_y: f64,
-    hover_width: f64,
-    hover_height: f64,
-) -> Result<(), String> {
-    if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite()
-        || !hover_x.is_finite() || !hover_y.is_finite()
-        || !hover_width.is_finite() || !hover_height.is_finite()
-    {
-        return Err("geometria do notch inválida".to_string());
-    }
-    let label = window.label().to_string();
-    state.rects.lock().unwrap().insert(
-        label.clone(),
-        IslandRect {
-            x,
-            y,
-            width,
-            height,
-        },
-    );
-    state.hover_rects.lock().unwrap().insert(
-        label,
-        IslandRect {
-            x: hover_x,
-            y: hover_y,
-            width: hover_width,
-            height: hover_height,
-        },
-    );
-    Ok(())
-}
-
-fn spawn_cursor_poll(
-    app: AppHandle,
-    rects: Arc<Mutex<HashMap<String, IslandRect>>>,
-    hover_rects: Arc<Mutex<HashMap<String, IslandRect>>>,
-    ignoring: Arc<Mutex<HashMap<String, bool>>>,
-) {
-    thread::spawn(move || {
-        let mut last_positions: HashMap<String, (f64, f64, bool, bool)> = HashMap::new();
-        let mut last_cursor_events: HashMap<String, Instant> = HashMap::new();
-        loop {
-            let mut cursor = POINT::default();
-            if unsafe { GetCursorPos(&mut cursor) }.is_err() {
-                thread::sleep(Duration::from_millis(16));
-                continue;
-            }
-
-            for (label, window) in app.webview_windows() {
-                if label != "main" && !label.starts_with("display-") {
-                    continue;
-                }
-                if window.is_visible().ok() != Some(true) {
-                    last_positions.remove(&label);
-                    last_cursor_events.remove(&label);
-                    continue;
-                }
-                let rect = rects.lock().unwrap().get(&label).copied();
-                let hover_rect = hover_rects.lock().unwrap().get(&label).copied();
-                let Some(rect) = rect else {
-                    if ignoring.lock().unwrap().get(&label).copied() != Some(true)
-                        && window.set_ignore_cursor_events(true).is_ok()
-                    {
-                        let _ = window.set_always_on_top(true);
-                        ignoring.lock().unwrap().insert(label.clone(), true);
-                    }
-                    last_positions.remove(&label);
-                    last_cursor_events.remove(&label);
-                    continue;
-                };
-                let Ok(origin) = window.outer_position() else {
-                    continue;
-                };
-                let scale = window.scale_factor().unwrap_or(1.0);
-                let x = (cursor.x - origin.x) as f64 / scale;
-                let y = (cursor.y - origin.y) as f64 / scale;
-                let dragging = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0;
-                let inside_body = x >= rect.x
-                    && x <= rect.x + rect.width
-                    && y >= rect.y
-                    && y <= rect.y + rect.height;
-                let inside_collapsed_hover = !dragging && hover_rect.is_some_and(|hover| {
-                    x >= hover.x - CURSOR_HIT_MARGIN
-                        && x <= hover.x + hover.width + CURSOR_HIT_MARGIN
-                        && y >= hover.y - CURSOR_HIT_MARGIN
-                        && y <= hover.y + hover.height + CURSOR_HIT_MARGIN
-                });
-                let inside = inside_body || inside_collapsed_hover;
-                let position = CursorPosition { x, y, inside, dragging };
-                // The hover margin can open the menu but remains click-through.
-                let ignore = !inside_body;
-                if ignoring.lock().unwrap().get(&label).copied() != Some(ignore)
-                    && window.set_ignore_cursor_events(ignore).is_ok()
-                {
-                    let _ = window.set_always_on_top(true);
-                    ignoring.lock().unwrap().insert(label.clone(), ignore);
-                }
-
-                let moved = last_positions.get(&label).map_or(true, |last| {
-                    (position.x - last.0).abs() >= 1.0
-                        || (position.y - last.1).abs() >= 1.0
-                        || inside != last.2
-                        || dragging != last.3
-                });
-                last_positions.insert(label.clone(), (position.x, position.y, inside, dragging));
-                let retry_hover_event = inside
-                    && last_cursor_events
-                        .get(&label)
-                        .map_or(true, |last| last.elapsed() >= Duration::from_millis(100));
-                if moved || retry_hover_event {
-                    let _ = app.emit_to(label.as_str(), "edge-ghosty-cursor", position);
-                    last_cursor_events.insert(label.clone(), Instant::now());
-                }
-            }
-            thread::sleep(Duration::from_millis(16));
-        }
-    });
 }
 
 fn window_geometry(edge: Edge, monitor: &Monitor, position_percent: f64) -> (PhysicalSize<u32>, PhysicalPosition<i32>) {
@@ -886,7 +749,7 @@ fn collapsed_island_rect(
     }
 }
 
-fn place_window(window: &WebviewWindow, edge: Edge, monitor: &Monitor, position_percent: f64) -> Result<(), String> {
+fn place_window(window: &WebviewWindow, edge: Edge, monitor: &Monitor, position_percent: f64) -> Result<HostLayout, String> {
     let (size, location) = window_geometry(edge, monitor, position_percent);
     let handle = window.hwnd().map_err(|error| error.to_string())?;
     unsafe {
@@ -903,7 +766,14 @@ fn place_window(window: &WebviewWindow, edge: Edge, monitor: &Monitor, position_
     }
     window
         .set_always_on_top(true)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    Ok(HostLayout {
+        edge,
+        position_percent: position_percent.clamp(0.0, 100.0),
+        origin: (location.x, location.y),
+        size: (size.width, size.height),
+        scale: monitor.scale_factor(),
+    })
 }
 
 #[tauri::command]
@@ -928,6 +798,7 @@ fn show_settings_window(app: AppHandle) -> Result<(), String> {
         .get_webview_window("settings-window")
         .ok_or_else(|| "janela de configurações não encontrada".to_string())?;
     window.center().map_err(|error| error.to_string())?;
+    island_host::set_webview_memory_low(&window, false);
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
 }
@@ -1036,6 +907,7 @@ fn place_utility_popup(
     popup
         .set_always_on_top(true)
         .map_err(|error| error.to_string())?;
+    island_host::set_webview_memory_low(&popup, false);
     popup.show().map_err(|error| error.to_string())?;
     popup
         .set_skip_taskbar(true)
@@ -1105,7 +977,7 @@ async fn apply_display_layout(
     let active_label = window.label().to_string();
     for (index, (_, target_window)) in windows.iter().enumerate() {
         if let Some(monitor) = selected.get(index) {
-            place_window(target_window, edge, monitor, position_percent)?;
+            let layout = place_window(target_window, edge, monitor, position_percent)?;
             target_window.show().map_err(|error| error.to_string())?;
             target_window
                 .set_skip_taskbar(true)
@@ -1115,14 +987,23 @@ async fn apply_display_layout(
                 .map_err(|error| error.to_string())?;
             let label = target_window.label().to_string();
             let collapsed = collapsed_island_rect(edge, bar_length, bar_thickness, position_percent, monitor);
-            state.rects.lock().unwrap().insert(label.clone(), collapsed);
-            state.hover_rects.lock().unwrap().insert(label, collapsed);
+            let mut hit = state.hit.lock().unwrap();
+            hit.rects.insert(label.clone(), collapsed);
+            hit.hover_rects.insert(label.clone(), collapsed);
+            // place_window gave the host its full size back.
+            hit.shrunk.remove(&label);
+            hit.layouts.insert(label, layout);
         } else {
             target_window.hide().map_err(|error| error.to_string())?;
-            state.rects.lock().unwrap().remove(target_window.label());
-            state.hover_rects.lock().unwrap().remove(target_window.label());
+            let mut hit = state.hit.lock().unwrap();
+            let label = target_window.label();
+            hit.rects.remove(label);
+            hit.hover_rects.remove(label);
+            hit.shrunk.remove(label);
+            hit.layouts.remove(label);
         }
     }
+    state.wake.nudge();
     app.emit(
         "edge-ghosty-layout-updated",
         LayoutUpdate {
@@ -1162,19 +1043,25 @@ pub fn run() {
             tray::install(app.handle()).map_err(std::io::Error::other)?;
             quick_chat_hotkey::start(app.handle().clone());
             let cursor_state = app.state::<CursorState>();
-            spawn_cursor_poll(
+            island_host::spawn_cursor_poll(
                 app.handle().clone(),
-                cursor_state.rects.clone(),
-                cursor_state.hover_rects.clone(),
-                cursor_state.ignoring.clone(),
+                cursor_state.hit.clone(),
+                cursor_state.wake.clone(),
             );
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(monitor) = window.primary_monitor()? {
                     window.set_ignore_cursor_events(true)?;
                     window.set_always_on_top(true)?;
-                    place_window(&window, Edge::Top, &monitor, 50.0).map_err(std::io::Error::other)?;
+                    let layout = place_window(&window, Edge::Top, &monitor, 50.0).map_err(std::io::Error::other)?;
+                    cursor_state.hit.lock().unwrap().layouts.insert("main".to_string(), layout);
                 }
                 window.set_skip_taskbar(true)?;
+            }
+            // Created hidden: let WebView2 keep them small until they are shown.
+            for label in ["utility-popup", "settings-window"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    island_host::set_webview_memory_low(&window, true);
+                }
             }
             Ok(())
         })
@@ -1217,7 +1104,10 @@ pub fn run() {
             google_workspace::google_add_task,
             google_workspace::google_clear_account,
             list_displays,
-            set_island_rect,
+            island_host::set_island_rect,
+            island_host::set_host_collapsed,
+            island_host::fit_webview_zoom,
+            island_host::hide_auxiliary_window,
             apply_display_layout,
             show_utility_popup,
             show_quick_chat,

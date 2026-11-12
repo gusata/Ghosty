@@ -1,0 +1,297 @@
+# Histórico de decisões do Edge Ghosty
+
+Arquivo integral do `AGENTS.md` até 2026-11-06, preservado sem edição. Itens posteriores corrigem ou substituem anteriores; o estado vigente está resumido no `AGENTS.md`.
+
+---
+
+# Memória do projeto Edge Ghosty
+
+Este arquivo deve ser lido no início de toda nova conversa ou tarefa neste repositório. Ele é a memória operacional do projeto e deve ser atualizado apenas quando houver uma decisão estrutural importante.
+
+## Regra de contexto
+
+Ao concluir cada tarefa, crie um arquivo novo em `docs/context/` com data e identificador diferentes. Nunca sobrescreva um contexto anterior. O arquivo deve registrar objetivo, alterações realizadas, arquivos tocados, validações, problemas conhecidos e próximos passos. O `AGENTS.md` permanece como memória geral; os arquivos em `docs/context/` são snapshots de cada tarefa.
+
+## Projeto
+
+- Nome atual: Edge Ghosty.
+- Diretório: `C:\Users\gustavo.sanches\Documents\01_Projetos\notchteste\teste`.
+- Plataforma alvo: Windows 10/11 x64.
+- Stack: Tauri 2, Rust, Vite, TypeScript, HTML/CSS e WebView2.
+- Inspiração visual: Coucou, especialmente o notch/island do macOS e as curvas pretas convexas que parecem sair da borda da tela.
+- Objetivo: um menu rápido e personalizável na borda do Windows, com visual predominantemente escuro, controles comuns e o Ghosty como mascote interativo.
+
+## Visão e requisitos do produto
+
+Estado atual da interface: Home, Pet e Atalhos são acessados por três botões de ícone no cabeçalho. Nas bordas superior e inferior, a ilha usa composição horizontal; na borda esquerda, fica estreita e alta, e as grades de cada menu empilham seus itens em uma coluna. A Home usa um cartão principal e quatro pílulas, com até 800×210 logical px na horizontal e 420×480 na vertical. Pet, Atalhos e Configurações ganham altura conforme o conteúdo, mantendo a janela hospedeira transparente em tamanho estável. Pet mostra o Ghosty em destaque; Foco, Bolso, personalização, prancheta, métricas do Codex e o chat rápido abrem na janela nativa `utility-popup`, separada da ilha.
+
+O menu deve:
+
+- ficar encostado na borda esquerda do monitor;
+- aparecer recolhido como uma barrinha/linha vertical discreta;
+- usar duas curvas/“orelhas” convexas pretas, com aparência de algo sendo cuspido pela borda;
+- expandir suavemente ao passar o mouse;
+- recolher suavemente quando o mouse sair;
+- manter uma base visual escura; a página do pet pode usar vidro translúcido e gradientes suaves que acompanham seu humor e o tipo de item guardado;
+- controlar o volume e a reprodução de mídia do sistema;
+- oferecer temporizador de foco, prancheta local, lançador rápido e ações personalizadas;
+- permitir guardar arquivos, imagens e textos no Bolso do Ghosty sem mover ou apagar os arquivos originais;
+- permitir personalizar nome, aparência e acessório do pet;
+- possuir três botões de navegação compactos para Home, Pet e Atalhos, junto aos botões de configurações e fechar;
+- possuir atalhos rápidos e permitir reordená-los;
+- não bloquear cliques em outras aplicações quando estiver recolhido;
+- manter animações limpas e discretas.
+
+## Histórico importante
+
+Decisao atual: a navegacao entre abas substitui somente o conteudo do painel, preservando o `.island-body` e a animacao em curso; as orelhas acompanham a geometria atual mesmo com o menu expandido.
+
+1. Foi pesquisado o repositório Coucou (`https://github.com/louis-cfm/coucou`) para entender o design do notch.
+2. A curva desejada não é uma concavidade para dentro: é uma curva convexa preta nas extremidades, criando a ilusão de que o menu sai da borda.
+3. O port Windows do Coucou desenha a ilha como uma superfície preta única com `border-radius` e recorta o conteúdo. O Edge Ghosty segue esse princípio: raio de 14 px recolhido e 22 px expandido, sem pseudo-elementos de orelha com gradiente.
+4. O projeto foi criado inicialmente como um app Tauri/Vite.
+5. O primeiro erro foi `cargo metadata ... program not found`; Rust/Cargo foram instalados.
+6. Depois apareceu `link.exe not found`; foram instalados os Visual Studio 2022 Build Tools com ferramentas C++.
+7. O `cargo` passou a funcionar no Developer PowerShell do Visual Studio.
+8. O erro seguinte foi `icon.ico not found`; foi criado um ícone ICO placeholder durante o build em `src-tauri/build.rs`.
+9. O executável chegou a compilar, mas apresentou `STATUS_ENTRYPOINT_NOT_FOUND` (`0xc0000139`). Foram investigados WebView2 e Visual C++ Runtime.
+10. O usuário confirmou WebView2 instalado, MSVC disponível e os redistributables Visual C++ instalados. Também foi usado `dumpbin /dependents` para investigar DLLs.
+11. O `npx tauri info` confirmou Tauri 2.12.1, WebView2 154, VS Build Tools 2022, Rust stable MSVC, Node 24 e npm 11.
+12. Foi adicionada integração de volume usando WASAPI/Core Audio via crate `windows`.
+13. O erro de importação de `IAudioEndpointVolume` foi corrigido: a API pertence a `windows::Win32::Media::Audio::Endpoints`, e foi adicionado o feature `Win32_Media_Audio_Endpoints`.
+14. O frontend mantém a janela nativa em dimensões estáveis durante abrir/fechar. `src/anim.ts` porta `Spring`, `Tracked` e a curva cúbica do Coucou; o backend consulta o cursor globalmente e usa `set_ignore_cursor_events` para deixar passar cliques fora da forma animada. `apply_display_layout` inicializa o hitbox recolhido no backend; a geometria animada é sincronizada pelo frontend.
+15. A interface ganhou base escura e um pet visual minimalista. O escopo atual do pet é companhia, foco e itens guardados, sem painel de consumo de agentes.
+16. A configuração Tauri define `alwaysOnTop: true`; além disso, `place_window` usa `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` e reaplica `set_always_on_top(true)` ao posicionar, mostrar ou alternar click-through.
+17. O polling nativo alterna o click-through, repete a posição do cursor a cada 100 ms enquanto ele está na área de hover e emite mudanças de posição; `pointerenter`/`pointerleave` no `.island-body` também dirigem abrir/recolher no Tauri. Durante uma pressão do botão esquerdo, o hitbox aumenta temporariamente para que o drag-and-drop passe pela janela transparente; a área normal de hover continua estreita. `setExpanded` é idempotente para as duas rotas cobrirem perda de evento sem duplicar a animação.
+18. A Home agora reúne volume, mídia, foco, lançador, prancheta, Bolso e um resumo do pet. A navegação usa três botões circulares de ícone no cabeçalho.
+19. O pet tem nome, três aparências e dois acessórios configuráveis. Sua aba prioriza o personagem; bolso e personalização abrem em painéis auxiliares. O painel usa vidro com gradiente animado conforme o humor e o tipo do item mais recente no Bolso. O desenho e os movimentos do Ghosty são renderizados por Canvas 2D em `src/pet-motion.ts`; o botão HTML preserva acessibilidade e clique.
+20. O Bolso aceita arquivos pelo evento nativo de drag-and-drop do Tauri e textos por soltar na área ou ler a prancheta sob ação explícita. Guarda caminhos e texto no `localStorage`, anima o item até o pet e não altera o arquivo original.
+21. Atalhos e ações personalizadas são salvos localmente; cada ação pode abrir vários aplicativos, arquivos, pastas ou endereços. Os itens podem ser reordenados.
+22. Durante um arrasto com o botão esquerdo pressionado, o hitbox nativo começa exatamente no retângulo publicado da barrinha, sem margem extra, e acompanha a expansão animada do notch. No uso normal, o hover mantém a margem de 14 px. O caminho do arquivo é persistido no Bolso antes da animação de ingestão.
+23. O Tauri 2 exige capability `core:event:default` para o frontend registrar `onDragDropEvent` e os eventos de hover/layout. `src-tauri/capabilities/default.json` concede essa permissão e `core:window:default` às janelas `main` e `display-*`; a capability deve continuar referenciada em `tauri.conf.json`.
+24. Em `2026-10-05-edge-mochi-canvas-engine`, o personagem passou de peças HTML/keyframes CSS para um renderer Canvas 2D com canais independentes, tweens interrompíveis, easing, olhar suavizado por `dt`, piscadas e microgestos. `src/anim.ts` continua dedicado à geometria da ilha.
+25. Em `2026-10-05-edge-mochi-seixo-vivo`, a direção visual do personagem foi definida como um seixo abstrato assimétrico com olhos pretos grandes e duas mãos laterais; sem orelhas, focinho, boca ou bochechas. A silhueta e os detalhes devem continuar distintos do Coucou.
+26. Em `2026-10-05-edge-mochi-grok-coucou-animacoes`, o olho padrão foi definido como uma cápsula vertical preta chapada, sem reflexo especular. `src/pet-motion.ts` adapta o repertório de animação do Ghosty inspirado no Coucou: estados idle/working/thinking/searching/approval/question/error/finished/ratelimit/sleeping/dizzy; emotes love/surprised/proud/wink/yawn/happy/annoyed; piscada, olhar, respiração, aceno, squash, giro, partículas e morph breve durante a ingestão. As formas de olhos e os gestos são desenhados no Canvas; acessórios mantêm o estilo do Edge Ghosty.
+
+27. Em `2026-10-05-edge-mochi-maos-e-engolida`, as maos ficam invisiveis em repouso e so aparecem durante gestos. A boca nao faz parte da expressao normal: ao receber um arquivo, o corpo vira uma forma de caixa e abre uma fenda horizontal no topo, fechando para a sequencia de mastigacao quando o item e solto. Ao cancelar o arrasto, a fenda, as maos e a morph recolhem. Essa excecao temporaria atualiza a decisao do item 25 sem mudar a identidade fantasiosa do personagem; os olhos continuam capsulas pretas foscas sem reflexos.
+
+28. Em `2026-10-05-edge-mochi-port-comportamentos-coucou`, o motor Canvas incorpora as animações do Ghosty inspiradas no Coucou que cabem no Edge: estados e badges, piscadas, olhar, partículas, aceno curto e saudação longa, reação a toques, acompanhamento horizontal do arquivo e sequência de sucção/mastigação. Os gatilhos ficam ligados a ações reais do Edge (`working`/`finished` no foco, `searching` na busca, saudação ao abrir, carinho no hover e reação a cliques/arquivos). Estados sem equivalente no produto não recebem gatilhos artificiais. Preservar o seixo assimétrico, olhos pretos foscos e mãos ocultas em repouso; não adicionar a barra de progresso do upload nem modos de ilha do Coucou.
+29. Em `2026-10-05-edge-mochi-home-horizontal-enxuta`, a Home foi simplificada por pedido do usuário para o formato horizontal: controles de mídia, volume e três atalhos salvos, sem rolagem. Busca e lançador ficam em Atalhos; Foco segue disponível por atalho. Usar uma superfície principal e poucos controles. Preservar a ilha e o motor de animação.
+30. Em `2026-10-05-edge-mochi-popup-fluxos-secundarios`, Foco, Bolso, personalização e prancheta passaram para a janela Tauri `utility-popup`, independente da ilha. A janela usa o mesmo `localStorage` para sincronizar estado; fecha pelo botão, Escape ou perda de foco. O atalho Foco inicia/retoma o temporizador e abre seus controles.
+31. Em `2026-10-05-edge-mochi-popup-arrastavel-tamanho-borda`, o popup foi reduzido para 400x500 logical px, pode ser arrastado pelo título e persiste sua posição física em `localStorage`; ao reabrir, a posição é limitada ao monitor disponível. A borda branca do cartão foi removida. O popup fica opaco por padrão (`transparent: false`, fundo CSS escuro); para vidro translúcido, ativar a transparência Tauri e reduzir `--utility-popup-opacity` em `src/style.css`. Manter `shadow: false` no Windows para evitar a borda nativa de 1 px.
+
+32. Em `2026-10-05-edge-mochi-codex-presenca`, a integração com sessões locais do Codex é ativada pelo usuário em Configurações e registra hooks de ciclo de vida no `hooks.json` do usuário. O hook local mantém eventos, nomes de ferramentas e tipos de subagente numa fila temporária no diretório local do app; prompt, resposta e resultados de ferramentas não são guardados nem enviados. O fluxo de aprovação acrescenta somente um resumo truncado da ação pendente, mantido localmente enquanto aguarda a decisão ou expira. O frontend converte esses eventos em estados já existentes do Ghosty. Ao desconectar, remover somente os handlers do Edge Ghosty, preservar os hooks existentes e desligar imediatamente o helper por um marcador local.
+
+33. Em `2026-10-06-edge-ghosty-terminal-conclusao`, a marca ativa passou a Edge Ghosty. Os hooks locais do Codex animam as três bolinhas enquanto uma tarefa está ativa e fazem o Ghosty saltar para fora da barra quando recebe `Stop`. As preferências antigas são migradas de `edge-mochi.*` para `edge-ghosty.*`, o nome padrão anterior vira “Ghosty” e os hooks instalados com o nome antigo continuam reconhecidos para remoção. O identificador Tauri permanece estável para manter os dados locais existentes.
+
+34. Em `2026-10-06-edge-ghosty-aprovacoes`, somente `PermissionRequest` roda como hook síncrono e aguarda até 570 segundos por uma escolha explícita no Ghosty. Aprovar e recusar retornam decisões reais ao Codex; sem heartbeat do app, ao desconectar ou ao expirar, o hook não decide e deixa o fluxo normal do Codex continuar. Com a ilha recolhida, o aviso externo fica clicável por meio do hitbox nativo; com a ilha aberta, o pedido aparece sobre a área do Ghosty. Avisos de conclusão aparecem somente com o menu fechado. O resumo de ação da aprovação fica apenas na fila/memória local enquanto o pedido está ativo.
+
+35. Em `2026-10-06-edge-ghosty-chat-codex-implementado`, o chat rápido abre no `utility-popup` por `Ctrl + Shift + Espaço`, configurável entre três combinações. O backend inicia sob demanda um `codex app-server` oculto por stdio, em um `CODEX_HOME` separado sob os dados locais do app; ativa pesquisa web, esforço baixo e sandbox somente leitura, e desativa shell e hooks. O login usa OAuth do ChatGPT sem pedir chave de API. A conversa local é apagada ao fechar ou iniciar outra conversa; sessões órfãs são removidas ao iniciar o serviço após uma reinicialização inesperada. O frontend executa apenas pedidos explícitos que correspondem a atalhos salvos, URLs HTTP(S) ou Foco; o modelo não abre aplicativos nem executa comandos.
+
+36. Em `2026-10-06-edge-ghosty-chat-permission-profile-windows-fix`, o app-server negocia `experimentalApi` e seleciona `permissions: ":read-only"` em `thread/start` e `turn/start`; não combina esse perfil com `sandbox`, `sandboxPolicy` ou `--sandbox`. O perfil nativo permite leitura ampla, mas bloqueia escrita; `shell_tool` e `hooks` seguem desativados. O sandbox unelevated do Windows recusa perfis customizados que negam `:root` e reabrem somente `:workspace_roots`, em vez de executar sem isolamento.
+37. Em `2026-10-06-edge-ghosty-chat-invalid-config-recovery`, foi removido do `CODEX_HOME` isolado do Ghosty um `config.toml` antigo com perfil `[permissions]` sem `default_permissions`, que fazia o Codex falhar ao carregar requisitos do workspace. O arquivo foi preservado como `.bak`; a configuração atual usa o perfil nativo `:read-only` e não deve recriar esse bloco.
+38. Em `2026-10-06-edge-ghosty-chat-modelo-padrao-luna`, o chat rápido carrega o catálogo `model/list` do app-server, persiste modelo e esforço no `localStorage` e envia a escolha em `thread/start`/`turn/start`. O padrão é `gpt-6-luna` com esforço `low`; as opções de esforço acompanham cada modelo retornado pelo catálogo.
+39. Em `2026-10-06-edge-ghosty-chat-popup-presenca-bolhas`, o chat rápido mostra o Ghosty em Canvas ao lado de um cartão de saudação que entra com animação e aceno. O personagem permanece montado durante a conversa e reage ao pensamento, à resposta e a erros; as mensagens ficam em bolhas alternadas por remetente, com cores e superfícies inspiradas no popup de aprovação. Os seletores de modelo e esforço continuam no topo.
+40. Em `2026-10-06-edge-ghosty-chat-interface-flutuante-minimalista`, a janela do chat rápido fica transparente e não desenha o cartão nem o cabeçalho usados pelos outros popups. Mostra somente uma barra compacta, os seletores de modelo/esforço, a saudação do Ghosty, o compositor em forma de pílula e as respostas em bolhas com um pequeno avatar. O Ghosty Canvas permanece visível e reage durante o streaming.
+41. Em `2026-10-06-edge-ghosty-chat-resposta-com-ghosty-unico`, o popup foi reduzido para 360×320 logical px. A conversa usa um único Canvas do Ghosty montado fora da área que re-renderiza as mensagens, à esquerda de todo o histórico; o avatar CSS duplicado e o aviso de privacidade visível foram removidos. Os seletores de modelo e esforço usam pílulas com fundo e borda, e o compositor é um campo único arredondado.
+
+42. Em `2026-10-06-edge-ghosty-chat-compactacao-final`, após inspeção do usuário, a altura máxima do chat foi reduzida novamente para 260 logical px. No estado vazio, Ghosty, saudação em bolha, seletores e campo de prompt ficam agrupados; no estado com conversa, a área de bolhas ocupa o espaço restante e rola. Esse snapshot substitui a dimensão 360×320 do item anterior.
+
+43. Em `2026-10-06-edge-ghosty-chat-redesign-opaco`, a composição foi reestruturada após feedback: cabeçalho curto com nome e atalho, seletores em duas cápsulas sólidas, um Ghosty Canvas à esquerda de bolhas com caudas e fundo opaco, e prompt em pílula opaca logo abaixo. Removidos do topo o status normal da conta e textos auxiliares; erros continuam visíveis e a conexão continua acessível pelo controle de login. A janela tem até 360×250 logical px; o shell externo permanece transparente e sem cartão.
+
+44. Em `2026-10-06-edge-ghosty-chat-entrada-pela-borda-inferior`, o atalho global abre o chat somente pela janela `main`, evitando chamadas concorrentes das janelas de outros monitores. O popup fica centralizado horizontalmente, 72 logical px acima da borda inferior, e ignora a última posição salva dos outros popups. A área de conteúdo fica ancorada embaixo e sobe com uma animação curta de translação e ressalto inspirada no popup de aprovação. Movimentos do chat não sobrescrevem a posição persistida de Foco/Bolso; reabrir o chat volta à borda inferior.
+
+45. Em `2026-10-06-edge-ghosty-chat-removido`, o chat rápido foi removido do produto: interface, preferências, atalho global, integração local de app-server e comandos Tauri exclusivos. As aprovações e demais hooks do Codex permanecem ativos.
+
+46. Em `2026-10-06-edge-ghosty-chat-figma-fluido`, a pedido do usuário o chat rápido foi reintroduzido no `utility-popup` e redesenhado conforme o Figma: janela transparente, Ghosty Canvas sem fundo escuro no canto inferior esquerdo, histórico com altura fixa e rolagem interna, barra de digitação larga e, abaixo dela, seletores de modelo/reasoning e botão de enviar. `Ctrl + Shift + Espaço` abre o popup centralizado 72 px acima da borda inferior; a entrada anima Ghosty, compositor e controles em sequência. `Ctrl + N` começa outra conversa. O serviço usa app-server sob demanda, OAuth em `CODEX_HOME` isolado, perfil `:read-only`, pesquisa web e recursos de shell/hooks desativados; a transcrição local é limpa ao fechar ou recomeçar. Este item substitui o estado de remoção do item 45.
+
+## Estado atual dos arquivos relevantes
+
+47. Em `2026-10-06-edge-ghosty-chat-transparente-bolhas`, o usuário esclareceu a leitura correta do Figma: o fundo do popup deve mostrar o desktop; “pesquise...” é uma bolha de exemplo do usuário e o retângulo maior é uma bolha de resposta do Ghosty, não uma busca nem um painel de histórico. O CSS do chat fica transparente; somente bolhas, compositor e controles têm superfícies. O Ghosty mantém sua silhueta Canvas em aproximadamente 100×85 px e entra de trás da borda antes do compositor e dos demais elementos, em uma sequência curta. Mensagens reais usam a área fixa transparente, ancorada embaixo e com rolagem interna.
+
+48. Em `2026-10-06-edge-ghosty-chat-bolhas-reais-login-oauth`, os exemplos do Figma definem somente o estilo das mensagens: “pesquise...” representa uma bolha real enviada pelo usuário e o retângulo grande uma resposta real do Ghosty. Não renderizar busca nem bolhas fictícias quando a conversa está vazia; mostrar apenas mensagens realmente trocadas, com usuário à direita, Ghosty à esquerda e rolagem limitada ancorada embaixo. No OAuth, o popup deve permanecer aberto quando perde foco para o navegador; mostrar o estado pendente, preservar o rascunho, manter a conexão pendente até `account/read` confirmar a conta e permitir nova tentativa se o app-server reportar falha ou não confirmar em 10 segundos. O botão de envio inicia login sem exigir texto; Enter com rascunho também pode iniciar login sem apagar o texto.
+
+49. Em `2026-10-06-edge-ghosty-chat-login-requires-openai-auth`, o estado autenticado do chat deve depender de `account/read` retornar uma conta não nula. `requiresOpenaiAuth: true` descreve a exigência do provedor e também é retornado para uma conta ChatGPT autenticada; não pode ser usado para negar o login. O `auth.json` isolado já foi criado durante o OAuth. A detecção foi corrigida em `src-tauri/src/codex_chat.rs`.
+
+50. Em `2026-10-06-edge-ghosty-chat-ghosty-sem-corte-follow-mouse`, o chat usa o mesmo `renderPetCharacter`/Canvas e `PetMotionEngine` do restante do app. Encaminhar `pointermove` do popup para `lookAt` usando a geometria do Ghosty, como a ilha faz. Não aplicar `overflow: hidden` no mask interno durante a entrada: o recorte deve ocorrer somente na borda real da janela transparente, para o overscan do Canvas não cortar o personagem. Preservar a animação de entrada e os estados/reações do motor.
+
+51. Em `2026-10-06-edge-ghosty-chat-permissoes-por-acao`, o app-server mantem `permissions: ":read-only"` como perfil inicial, mas usa `approvalPolicy: "on-request"` e habilita `features.shell_tool`. Pedidos JSON-RPC de comando, alteracao de arquivo e acesso de filesystem/rede aparecem no popup com detalhes e opcoes para permitir uma vez ou negar. Concessoes de `request_permissions` usam somente o subconjunto solicitado e escopo `turn`. Hooks continuam desligados; nao ha liberacao automatica nem perfil irrestrito.
+
+52. Em `2026-10-06-edge-ghosty-chat-auto-aprovar-sessao`, o chat oferece um modo opcional, desligado por padrao, para aprovar automaticamente os pedidos de permissao durante a conversa atual. A ativacao e explicita pelo controle de escudo ou pelo botao no pedido pendente; o app-server recebe `acceptForSession` para comandos/alteracoes e `scope: "session"` para concessoes de permissao, limitadas ao subconjunto pedido. Fechar o popup ou iniciar outra conversa reinicia o modo. Desativar interrompe novas aprovacoes automaticas, mas concessoes ja feitas continuam validas ate reiniciar a conversa. Isso nao altera os hooks de aprovacao das sessoes locais do Codex.
+
+53. Em `2026-10-06-edge-ghosty-chat-popup-preservado-durante-task`, a janela do chat nao fecha ao perder foco se o login estiver pendente, a resposta do app-server ainda estiver ativa ou houver pedidos de permissao pendentes. Essa decisao e capturada no evento de perda de foco, para uma resposta que termina durante o pequeno atraso de fechamento nao ser encerrada por acidente. Depois, uma nova perda de foco volta ao comportamento normal; Escape e o fechamento explicito continuam disponiveis.
+
+54. Em `2026-10-06-edge-ghosty-chat-abertura-direta-sites`, URLs HTTP(S), domínios completos e aliases conhecidos usam `open_targets` sem chamar o modelo. Em `2026-10-06-edge-ghosty-cache-sites-resolver`, nomes naturais desconhecidos usam uma busca web curta e isolada; quando houver endereço oficial confiável, abrir e guardar o mapeamento para acessos diretos seguintes. Se a busca falhar ou for ambígua, abrir resultados de busca para escolha do usuário.
+
+55. Em `2026-10-06-edge-ghosty-chat-acoes-em-duas-etapas`, quando uma mensagem começa com abertura de site seguida por outra tarefa, abrir imediatamente se o destino vier de URL, domínio, alias ou cache e enviar somente a continuação em um turno ao modelo. Para nome desconhecido, resolver e abrir primeiro; depois enviar a continuação. Não criar várias chamadas de raciocínio para dividir o mesmo pedido.
+
+56. Em `2026-10-06-edge-ghosty-cache-sites-resolver`, o cache de sites usa uma `Map` em memória carregada uma vez de um registro compacto no `localStorage`, limitada a 256 entradas; alterações entre janelas Tauri sincronizam pelo evento `storage`. Consultas conhecidas são lookup local O(1), sem rede/modelo. Para cache miss, abrir um thread separado do app-server, com esforço baixo e perfil somente leitura, pedir apenas uma URL oficial em JSON e consumir seus eventos sem misturá-los à transcrição normal. Manter o nome da conversa principal e o contexto do resolvedor separados.
+
+57. Em `2026-10-06-edge-ghosty-chat-abre-link-unico`, quando um turno do chat termina normalmente e a resposta do Ghosty contém exatamente um URL HTTP(S) válido, abrir esse destino uma vez com `open_targets`. Respostas com zero ou vários links permanecem apenas clicáveis; turnos interrompidos ou com erro não abrem nada automaticamente.
+
+58. Em `2026-10-07-edge-ghosty-integracoes-painel-largo`, a janela hospedeira comporta o menu largo: até 900×720 logical px na borda esquerda e 1100×420 nas bordas horizontais, com superfície expandida de até 860×650 e 1060×380. A Home em duas colunas mostra uma integração opcional do GitHub (PRs próprios, revisões pedidas e CI), com token guardado no Gerenciador de Credenciais do Windows. A bandeja oferece abrir, configurações, pausar atualizações e sair; pausar interrompe o refresh do GitHub e a coleta de métricas, sem suspender aprovações do Codex. Métricas locais agregam somente contagens e tempo estimado por 90 dias. O Bolso pode preparar uma pergunta explícita no chat para o item selecionado. Sons são opcionais e desligados por padrão; Ghosty tem seis aparências e cinco acessórios. Não adicionar integração com agentes além do Codex.
+
+59. Em `2026-10-07-edge-ghosty-coucou-geometria-corrigida`, a geometria expandida efetiva é escrita inline por `animateIsland` em `src/main.ts`; manter seus alvos alinhados ao CSS e à janela hospedeira (até 860×650 na esquerda e 1060×380 nas bordas horizontais). A Home horizontal tem dois cartões e precisa substituir o seletor legado de três colunas; a tela do pet usa uma linha limitada ao espaço disponível, sem altura mínima antiga que force recorte. A sincronização dos retângulos nativos continua acompanhando cada quadro da animação.
+
+60. Em `2026-10-07-edge-ghosty-coucou-recomendacoes-implementacao`, a integração com Codex só altera `hooks.json` depois de exibir a prévia dos grupos do Ghosty, obter confirmação, verificar fingerprint do arquivo e criar backup datado quando ele já existe. Atualizações do helper não são aplicadas silenciosamente ao iniciar. O ticker de atividade recente mantém somente nome/tipo da etapa e horário em memória, limitado a 12 eventos; não persiste nomes de sessão, prompts, respostas, comandos ou resultados. As contagens/durações do resumo continuam locais por até 90 dias. A Vercel é consultada em leitura com token no Windows Credential Manager, opcionalmente filtrada por um ID de equipe sem segredo no `localStorage`; mostra até cinco deploys, mantém snapshots em memória e atualiza a cada cinco minutos. Pausar na bandeja bloqueia refresh e validação de tokens do GitHub/Vercel; retomar permite atualizar novamente. Perguntar sobre texto do Bolso envia no máximo os primeiros 6.000 caracteres; perguntar sobre arquivo consulta apenas o tamanho e passa nome/caminho ao chat, sem anexar bytes automaticamente. Acima de 25 MiB aparece um aviso recomendado, não um bloqueio: leitura posterior continua dependente de permissão explícita no Codex e do serviço do provedor. Não adicionar browser flags privados ao WebView2; a configuração do Ghosty não usa `additionalBrowserArgs`.
+
+61. Em `2026-10-08-edge-ghosty-telas-focadas-coucou`, a Home deixa de juntar mídia, atalhos, integrações e métricas num painel. Ela oferece quatro vistas internas — Agora, Integrações, Codex e Mídia — com estado contextual do Ghosty em Agora. Foco, Bolso e Prancheta ficam em ações rápidas compactas; a navegação principal Home/Pet/Atalhos e a geometria de borda do Edge Ghosty permanecem.
+
+62. Em `2026-10-08-edge-ghosty-coucou-menus-fieis`, a auditoria do port Windows do Coucou em `docs/design/coucou-menus-2026-10-08.md` substitui a hierarquia de quatro abas internas do item 61 por um cartão principal e quatro pílulas que trocam o foco entre Agora, Codex, GitHub, Vercel e Mídia. O cabeçalho da ilha usa três ícones compactos sem marca textual e as telas de Pet, Atalhos, Configurações e popups utilitários compartilham a paleta, as cápsulas e os cartões do Coucou. A geometria/hover/click-through da ilha, o motor Canvas e o modelo do Ghosty, a janela separada do chat e a semântica das integrações permanecem próprias do Edge Ghosty.
+
+63. Em `2026-10-08-edge-ghosty-ilha-ajustada-ao-conteudo`, a superfície preta expandida da Home passou a aproximadamente 800×210 logical px para acompanhar os cartões 760×150 e eliminar o vazio da janela anterior. Pet usa até 800×330; Atalhos até 800×380 nas bordas horizontais e 800×430 na esquerda; Configurações/onboarding usam até 800×380 nas bordas horizontais e 800×520 na esquerda. `expandedIslandSize()` em `src/main.ts` é a fonte da geometria, e o CSS lê `--expanded-width`/`--expanded-height`. A janela Tauri hospedeira mantém suas dimensões transparentes estáveis; o corpo animado e o hitbox nativo continuam sincronizados por quadro. Trocar abas ou abrir/fechar Configurações adapta a superfície sem mudar a barrinha recolhida nem o modelo do Ghosty.
+
+64. Em `2026-10-08-edge-ghosty-grids-verticais-na-esquerda`, a composição acompanha a orientação da borda: Home, Pet, Atalhos, Configurações e onboarding usam cartões empilhados e grades em uma coluna quando a ilha fica à esquerda. A Home usa até 420×480 logical px na esquerda; Pet, Atalhos e Configurações/onboarding usam até 420×620, limitados ao espaço disponível do host. As bordas superior e inferior mantêm suas larguras e grades horizontais anteriores. O conteúdo do Pet mantém rolagem onde necessário; o personagem, a barrinha recolhida, as orelhas e a animação da ilha não mudam. Essa orientação substitui as dimensões verticais do item 63.
+
+65. Em `2026-10-08-edge-ghosty-player-progresso-mixer-lateral`, a tela Mídia mostra capa, título/artista, progresso e busca na faixa quando a sessão do Windows informa esses dados; o progresso atualiza enquanto a Home/Mídia está aberta, e a barra fica desabilitada quando o player não aceita busca. A capa só é consultada novamente quando a faixa muda. O botão “Volume dos apps” abre um mixer anexado à direita e amplia a ilha com `animateIsland`: até 1060×250 logical px nas bordas horizontais e 860×480 na esquerda, limitado à janela hospedeira. `expandedIslandSize()` continua como fonte de geometria e o hitbox acompanha cada quadro. O mixer usa o volume das sessões de áudio Core Audio por processo no dispositivo de saída padrão, sem substituir o slider de volume geral; sessões expiradas e o próprio WebView do Ghosty são omitidos.
+
+66. Em `2026-10-08-edge-ghosty-midia-botoes-ghosty-blur`, a vista Mídia mantém a mesma grade da Home para não reduzir as quatro pílulas; o Ghosty permanece no cartão principal, com sua área reservada. A capa nítida fica à frente de uma versão ampliada e desfocada que preenche discretamente o cartão. Ao abrir o mixer, a coluna de navegação conserva aproximadamente 352 px nas bordas horizontais e até 420 px na esquerda; nessa orientação, o mixer ocupa a coluna lateral ao lado dos cartões empilhados.
+
+67. Em `2026-10-08-edge-ghosty-midia-player-controles-espacados`, o player não mostra mais uma miniatura quadrada da capa. A arte permanece como fundo ambiental ampliado, desfocado e escurecido no cartão. Título e artista usam a largura disponível, e busca, transporte e volume ganham alvos maiores e mais respiro, preservando a área de Ghosty e o tamanho da navegação.
+
+68. Em `2026-10-08-edge-ghosty-midia-fundo-total-barra-larga`, o blur da arte da faixa cobre o cartão principal inteiro, inclusive a área de Ghosty; o personagem fica desenhado acima do fundo. A cápsula escura exclusiva atrás dos controles foi removida para que a arte continue aparecendo nessa área. As vistas horizontais da ilha passam a usar até 960 logical px de largura (conteúdo Home até 920 px); as alturas por aba permanecem iguais. O mixer mantém a expansão de até 1060 px. A composição da borda esquerda permanece nos limites anteriores.
+
+69. Em `2026-10-08-edge-ghosty-midia-volume-vertical-controles-neutros`, na vista Mídia o volume principal saiu do rodapé do player e ocupa uma coluna vertical entre o cartão principal e as pílulas. Na borda esquerda, a coluna entra entre os cartões empilhados. O espaço liberado deixa os controles anterior/reproduzir/próxima centralizados e maiores. As barras de volume e busca usam acento cinza claro em vez de azul; a Home/Mídia horizontal usa até 1000 logical px para acomodar a coluna e mantém o limite do mixer.
+
+70. Em `2026-10-08-edge-ghosty-midia-cartao-preenchido-capa-retry`, os elementos de Mídia esticam até a largura útil completa do cartão mesmo quando o componente pai usa alinhamento compacto. O blur da capa ganha presença sem virar uma miniatura quadrada. O PowerShell lê o objeto COM da miniatura usando reflexão para adaptar o `AsStream`; não chamar `Dispose()` no objeto COM, pois ele não expõe esse método e o `catch` zerava a imagem já lida. Quando `ContentType` não vem exposto, identifica JPEG/PNG/GIF/WebP pelos bytes. Enquanto a sessão não entrega arte, o frontend tenta novamente; depois usa o ID da faixa para evitar recodificação desnecessária.
+
+71. Em `2026-10-08-edge-ghosty-midia-capa-stream-close-fix-runtime`, a miniatura não aparecia porque o `Dispose()` inválido do wrapper COM lançava exceção depois da leitura e o `catch` apagava o Data URL. Remover essa chamada manteve os streams gerenciados liberados e a imagem foi confirmada no cartão Mídia com blur no WebView2.
+
+72. Em `2026-10-08-edge-ghosty-mixer-sidebar-ancorado`, abrir Volume dos apps não altera a geometria nem centraliza novamente a ilha. O painel anima sua largura dentro do cartão lateral já reservado, preservando o cartão principal e a altura; os controles por aplicativo usam sliders verticais. Na borda esquerda, o painel ocupa a área dos cartões de navegação sem alterar as três linhas do layout.
+
+### Frontend
+
+- `src/main.ts`: renderiza a ilha com dimensões e orientação expandidas conforme a tela, a Home em cartão principal e quatro pílulas, integrações GitHub/Vercel, mídia/volume/atalhos e atividade local do Codex; o mixer de aplicativos anima dentro do cartão lateral sem alterar a geometria da ilha. Abre Foco, Bolso, personalização, prancheta, métricas e chat rápido em `utility-popup`. Mantém os hooks do Codex com prévia e confirmação, ticker efêmero, avisos de conclusão, aprovações explícitas, o modo opcional de aprovação automática por conversa, cache em memória de nomes de site para URL, resolução web de cache miss e a janela aberta enquanto uma tarefa do chat está pendente.
+- `src/pet-motion.ts`: desenha o Ghosty no Canvas 2D e controla seus canais de movimento, estados e emotes, olhos-cápsula sem reflexos, olhar, piscadas, morph de ingestão e gestos das mãos.
+- `src/sounds.ts`: gera efeitos tonais curtos com Web Audio; o usuário precisa ativá-los nas Configurações e o volume é ajustável.
+- `src/style.css`: contém a estética escura inspirada no Coucou, orelhas convexas e animações do island, grades adaptadas à orientação, cartões compactos da Home, canvases e configurações do pet, controles, prancheta, Bolso, atalhos, integrações e as superfícies do chat.
+- `index.html`: ponto de entrada do frontend.
+- `vite.config.ts`, `tsconfig.json`, `package.json`: configuração Vite/TypeScript/Tauri.
+
+### Backend Rust/Tauri
+
+- `src-tauri/src/lib.rs`: comandos de volume, mídia, abertura de destinos, metadados de arquivos do Bolso, atalhos, hitbox, layout, bandeja e exibição/posicionamento dos popups; o chat tem geometria inferior própria.
+- `src-tauri/src/credentials.rs`: leitura, gravação e remoção reutilizáveis de tokens genéricos no Windows Credential Manager; não enviar segredos para o frontend depois da gravação.
+- `src-tauri/src/github.rs`, `src-tauri/src/vercel.rs` e `src-tauri/src/tray.rs`: consultas REST, tokens no Windows Credential Manager, snapshots em memória e menu da bandeja; pausa bloqueia chamadas de rede automáticas e manuais de GitHub/Vercel.
+- `src-tauri/src/codex_chat.rs` e `src-tauri/src/quick_chat_hotkey.rs`: iniciam e isolam o app-server do chat, expõem catálogo/conta/streaming, resolvem nomes de sites em threads separados, encerram a sessão ao fechar e registram `Ctrl + Shift + Espaço` no Windows.
+- `src-tauri/src/codex_hooks.rs` e `src-tauri/src/codex-hook.ps1`: instalam/removem os hooks de sessão do Codex preservando as outras entradas de `hooks.json`; enviam eventos e resumos de aprovação pela fila local; aguardam e retornam `allow`/`deny` somente em `PermissionRequest`, com fallback ao Codex se Ghosty não responder.
+- `src-tauri/Cargo.toml`: inclui `windows` com features de áudio, COM, prancheta Win32 (`DataExchange`/`Memory`/`Ole`), entrada de teclado, ShellExecute e `Win32_UI_WindowsAndMessaging`; usa `reqwest` com rustls e o recurso `tray-icon` do Tauri.
+- `src-tauri/build.rs`: chama `tauri_build::build()` e gera um `icons/icon.ico` placeholder se o ícone ainda não existir.
+- `src-tauri/tauri.conf.json`: ilha transparente, sem decoração e sempre no topo; popup transparente inicial 560x472, sem decoração/sombra e sempre no topo. Foco/Bolso/personalização/prancheta continuam ajustados para 400x500 pelo backend; bundle desativado durante desenvolvimento.
+- A configuração Tauri também declara a janela oculta `utility-popup`; `src-tauri/capabilities/default.json` inclui essa janela e permite ocultá-la e arrastá-la pelo frontend. `src-tauri/gen/schemas/capabilities.json` reflete a capability gerada.
+
+### Comandos nativos
+
+- `quick_chat_respond`: devolve ao app-server a decisao explicita do usuario para pedidos de permissao pendentes do chat.
+
+- `system_volume(value)`: usa `CoInitializeEx`, `MMDeviceEnumerator`, endpoint de áudio padrão e `SetMasterVolumeLevelScalar`.
+- `get_system_volume()`: consulta o volume do endpoint padrão.
+- `media_control(action)`: envia as teclas de mídia de play/pause, faixa anterior e próxima.
+- `get_media_info()`: consulta os metadados da sessão de mídia do Windows via Windows Media Control; retorna campos vazios se a consulta não estiver disponível.
+- `read_clipboard_text()` e `write_clipboard_text(text)`: leem e escrevem texto na prancheta do Windows usando Win32.
+- `open_targets(targets)`: abre destinos de usuário com `ShellExecuteW`, sem montar um comando de terminal.
+- `run_shortcut(name)`: abre Terminal (`wt.exe`), Captura (`ms-screenclip:`) ou Foco (`ms-settings:quiethours`).
+- `set_island_rect(...)`: publica a geometria atual para o polling nativo de cursor e click-through.
+- `apply_display_layout(...)`: posiciona a janela hospedeira em dimensões estáveis para a borda e os monitores selecionados.
+- `quick_chat_start/status/login/send/cancel/close`: controlam o app-server local, OAuth, catálogo de modelos, reasoning, turnos em streaming e limpeza da transcrição.
+- `quick_chat_resolve_website`: consulta uma URL oficial em thread separado e retorna somente o resultado validado como JSON; o frontend mantém cache local rápido.
+
+## Ambiente confirmado pelo usuário
+
+Saída relevante do `npx tauri info`:
+
+- Windows 10.0.26200 x64.
+- WebView2 154.0.4258.48.
+- Visual Studio 2022 Build Tools.
+- Rust/cargo stable `x86_64-pc-windows-msvc`.
+- Node 24.13.1 e npm 11.8.0.
+- Tauri 2.12.1, tauri-build 2.7.1, wry 0.57.0 e tao 0.37.1.
+
+## Validações
+
+- `npm run build` passou após as últimas mudanças de frontend.
+- A compilação Rust deve ser validada no Developer PowerShell do Visual Studio, pois esse shell possui o ambiente MSVC configurado.
+- As funcionalidades adicionadas no snapshot `2026-10-02-edge-mochi-painel-pessoal` ainda precisam de compilação e inspeção no app; essa tarefa não executou build ou testes.
+- A margem extra de hover durante arrasto e a nova tela minimalista do Ghosty (`2026-10-02-edge-mochi-pet-somente-hover`) também precisam de inspeção em runtime.
+- O hitbox temporário para drop e a persistência do Bolso (`2026-10-02-edge-mochi-arrasto-e-bolso`) foram revisados estaticamente; ainda precisam de teste manual no Windows com arquivos reais.
+- A permissão Tauri para eventos de arrasto e hover (`2026-10-02-edge-mochi-acl-arrasto`) foi adicionada após identificar que não havia capability no projeto; precisa de reinício e validação manual no Windows.
+- O hitbox amplo de arrasto foi reduzido para acompanhar a geometria visível do notch (`2026-10-02-edge-mochi-hitbox-drag-bar`); a margem regular de hover e a animação não foram alteradas.
+- O renderer Canvas do Ghosty (`2026-10-05-edge-mochi-canvas-engine`) foi revisado estaticamente; ainda precisa de build e inspeção visual no Windows nos tamanhos compacto/grande e com `prefers-reduced-motion`.
+- O popup de utilitários (`2026-10-05-edge-mochi-popup-fluxos-secundarios`) foi revisado estaticamente; ainda precisa de compilação Rust e inspeção no Windows, inclusive drag-and-drop no Bolso e sincronização do foco.
+- A janela arrastável e a restauração da posição do popup (`2026-10-05-edge-mochi-popup-arrastavel-tamanho-borda`) ainda precisam de confirmação manual no runtime do Windows.
+- A integração de presença do Codex (`2026-10-05-edge-mochi-codex-presenca`) foi revisada estaticamente; ainda precisa de compilação no Developer PowerShell, reinício do Codex, aprovação do hook se solicitada e inspeção das reações em runtime.
+- A reação da barra às tarefas e o salto de conclusão do Ghosty (`2026-10-06-edge-ghosty-terminal-conclusao`) passaram por `npm run build`; ainda precisam de inspeção visual no Windows com o hook do Codex ativo e nas três bordas disponíveis.
+- As aprovações contextuais do Ghosty (`2026-10-06-edge-ghosty-aprovacoes`) passaram por `npm run build` e `cargo check`; ainda precisam de inspeção no Windows com o Codex reiniciado e o hook atualizado aprovado, verificando ambos os modos da ilha e o fallback de timeout/desconexão.
+- O chat rápido do Codex, incluindo seletor de modelo/esforço (`2026-10-06-edge-ghosty-chat-modelo-padrao-luna`), passou por `npm run build` e `cargo check`; ainda precisa de inspeção manual no Windows do atalho global, login ChatGPT, seletor, pesquisa em streaming e abertura de atalhos.
+- A apresentação do chat rápido com o Ghosty persistente e mensagens em bolhas (`2026-10-06-edge-ghosty-chat-popup-presenca-bolhas`) passou por `npm run build` e revisão de whitespace; ainda precisa de inspeção visual no popup do Windows durante abertura, resposta em streaming e estados de erro.
+- A remoção do cartão externo do chat (`2026-10-06-edge-ghosty-chat-interface-flutuante-minimalista`) passou por `npm run build` e `git diff --check`. A inspeção nativa não foi possível nesta sessão: `npm run tauri dev` encontrou a porta Vite 1420 já ocupada e a janela do Ghosty existente não aceitou foco pelo Orca.
+- A resposta com um único Ghosty Canvas, controles em pílula e janela reduzida (`2026-10-06-edge-ghosty-chat-resposta-com-ghosty-unico`) passou por `npm run build`, `cargo check` e `git diff --check`; a correção seguinte reduziu a altura para 260 logical px, compilada nesta tarefa. A inspeção visual ainda depende de reiniciar/abrir o popup real do Windows.
+- O redesign de hierarquia e superfícies opacas do chat (`2026-10-06-edge-ghosty-chat-redesign-opaco`) passou por `npm run build`, `cargo check` e `git diff --check`; ainda requer inspeção do popup após reiniciar o app.
+- A entrada inferior do chat (`2026-10-06-edge-ghosty-chat-entrada-pela-borda-inferior`) passou por `npm run build`, `cargo check` e `git diff --check`; falta inspecionar o movimento no runtime do Windows.
+- A correção das bolhas reais e do estado do OAuth (`2026-10-06-edge-ghosty-chat-bolhas-reais-login-oauth`) passou por `npm run build` e `git diff --check`; um probe isolado do app-server confirmou que `account/login/start` retorna `authUrl`. Como nenhum código Rust foi alterado nesta correção, `cargo check` não foi repetido. Falta concluir login no navegador e inspecionar o popup no runtime Windows.
+- A correção do estado autenticado do chat (`2026-10-06-edge-ghosty-chat-login-requires-openai-auth`) passou por `cargo check` e `git diff --check`; a inspeção oficial do protocolo confirmou que uma conta ChatGPT autenticada pode retornar `requiresOpenaiAuth: true`. O runtime passou a mostrar `Enviar mensagem` com o perfil existente. O conteúdo do `auth.json` não foi lido.
+- A correção do Canvas cortado e do olhar do Ghosty no popup (`2026-10-06-edge-ghosty-chat-ghosty-sem-corte-follow-mouse`) passou por `npm run build` e `git diff --check`; falta conferir visualmente a entrada e o acompanhamento do mouse no runtime após a atualização.
+- A interface do chat baseada no Figma, a animação sequencial, o atalho global e a ponte app-server (`2026-10-06-edge-ghosty-chat-figma-fluido`) passaram por `npm run build`, `cargo check` e `git diff --check`; falta abrir o popup no Windows e conferir login, catálogo, streaming, rolagem e animações.
+- A correção da transparência, das bolhas de exemplo, da proporção do Ghosty e da sequência de entrada (`2026-10-06-edge-ghosty-chat-transparente-bolhas`) passou por `npm run build` e `git diff --check`; a inspeção visual do popup não foi possível porque o Orca não conseguiu focar a janela nativa transparente.
+- A resolução de nomes desconhecidos de sites e o cache de leitura rápida (`2026-10-06-edge-ghosty-cache-sites-resolver`) passaram por `npm run build`, `cargo check` e `git diff --check`; ainda precisam de inspeção manual com OAuth conectado e uma primeira busca, uma abertura pelo cache e uma busca ambígua/falha.
+- O painel amplo, integração opcional do GitHub, menu da bandeja, métricas locais do Codex, sons e novas aparências (`2026-10-07-edge-ghosty-integracoes-painel-largo`) passaram por `npm run build`, `cargo check` e `git diff --check`; ainda requerem inspeção manual no Windows, incluindo token GitHub fine-grained, ações da bandeja e dimensões nas três bordas.
+- A correção da geometria inline da ilha, da Home horizontal e da altura do palco do Ghosty (`2026-10-07-edge-ghosty-coucou-geometria-corrigida`) passou por `npm run build` e `git diff --check`; Home e Pet foram inspecionados no runtime Windows a 1100×420. A geometria da borda esquerda ainda merece conferência manual.
+- A compilação completa do app e a inspeção no runtime Windows continuam pendentes para fluxos que dependem do MSVC e do WebView2.
+- Comando recomendado:
+
+```powershell
+cd "C:\Users\gustavo.sanches\Documents\01_Projetos\notchteste\teste"
+cargo clean --manifest-path .\src-tauri\Cargo.toml
+npm run tauri dev
+```
+
+## Cuidados para próximas tarefas
+
+- No Windows, reaplicar `set_skip_taskbar(true)` imediatamente depois de cada `show()` da ilha e do popup. A chamada antes de mostrar pode não remover o botão que o Windows cria ao exibir a janela.
+
+- Atualizacao dos itens 51 e 52: o shell do app-server fica habilitado sob perfil inicial de leitura e `on-request`. No chat, aprovacoes valem por acao por padrao; a aprovacao automatica exige ativacao explicita e dura somente pela conversa atual. Desligar o modo impede novos aceites automaticos, mas nao revoga concessoes de sessao ja feitas; reinicie o chat para remove-las. Os hooks de aprovacao das sessoes locais do Codex continuam exigindo resposta explicita no Ghosty.
+
+- Manter o Edge Ghosty como painel rápido geral; o pet pode reagir a foco, tarefas do Codex e itens guardados sem tornar o produto dependente de agentes.
+- Preservar o polling nativo do cursor e a janela hospedeira estável durante o hover. Manter também `pointerenter`/`pointerleave` no `.island-body`; o polling pode alternar click-through sem o WebView receber aquele primeiro evento de mouse.
+- Preservar `alwaysOnTop: true` e a promoção `HWND_TOPMOST` sem remover `SWP_NOACTIVATE`, para que a janela permaneça no topo sem roubar o foco.
+- Ao alterar hitboxes de avisos externos, preservar o click-through fora da barrinha e incluir somente os botões de aprovação visíveis no retângulo interativo. Nunca aprovar automaticamente: sem resposta explícita no Ghosty, deixar o Codex apresentar seu fluxo normal.
+- Manter o desenho e os movimentos do Ghosty em Canvas 2D no `src/pet-motion.ts`; `src/style.css` cuida do tamanho e posicionamento do canvas, enquanto `src/anim.ts` continua cuidando apenas da geometria do island.
+- Manter Foco, Bolso, personalização e prancheta na janela `utility-popup`; não reincorporar esses fluxos no corpo animado da ilha sem uma mudança de produto deliberada.
+- Manter o popup arrastável pelo título, salvar a posição, o cartão sem borda CSS e `shadow: false`; ajustar a opacidade em `--utility-popup-opacity`. A transparência real da janela depende de `transparent: true` em `src-tauri/tauri.conf.json` e fundo externo CSS transparente.
+- O chat rápido foi reintroduzido no item 46. Manter OAuth no `CODEX_HOME` isolado, `permissions: ":read-only"`, shell/hooks desativados e limpeza das transcrições ao fechar; não alterar os hooks de aprovação existentes.
+- Usar `apply_patch` para editar arquivos.
+- Antes de alterar a arquitetura, verificar este arquivo e o snapshot mais recente em `docs/context/`.
+- Ao finalizar uma tarefa, criar um novo snapshot em `docs/context/`.
+- Se a compilação Rust falhar, solicitar a mensagem completa do Developer PowerShell e corrigir o código com base nela.
+
+73. Em `2026-10-08-edge-ghosty-instalador-windows-github`, o bundle Windows usa NSIS para gerar `-setup.exe`, instala por usuário sem exigir administrador, inclui o runtime do Visual C++ e executa o bootstrapper embutido do WebView2 quando necessário. O desinstalador padrão do Windows fica disponível e preserva os dados locais do usuário. A primeira execução limpa abre um guia que explica a barrinha e a navegação, além de permitir configurar atalhos e inicialização. O chat continua dependendo do Codex CLI instalado separadamente. A tag `vX.Y.Z` aciona GitHub Actions e cria um rascunho de Release; o ícone transparente placeholder foi substituído pelo símbolo vetorial do Ghosty convertido em ICO.
+
+74. Em `2026-10-08-edge-ghosty-release-v1-0-0`, as versões do app, npm, Cargo e Tauri ficam alinhadas em `1.0.0`. Depois de verificar que a tag antiga não tinha Release publicado nem execução de Actions, `v1.0.0` foi movida para o commit `fcc8af3` e enviada ao repositório canônico `gusata/Ghosty`. O workflow `Windows release` concluiu com sucesso e deixou o setup NSIS anexado ao rascunho `Edge Ghosty v1.0.0`; revisar e publicar o rascunho manualmente. O `origin` local aponta para `https://github.com/gusata/Ghosty.git`.
+
+75. Em `2026-10-08-edge-ghosty-windows-sem-console`, builds de release do Tauri no Windows usam `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` em `src-tauri/src/main.rs`, para o executável abrir como app GUI sem janela de terminal; builds de desenvolvimento mantêm o console. A versão `1.0.1` corrige a janela de console observada no release público `1.0.0`. A tag `v1.0.1` dispara o workflow e deixa o instalador NSIS em um rascunho de Release para publicação manual.
+
+76. Em `2026-10-08-edge-ghosty-hover-monitores-pet-layout`, a margem de hover de 14 px fica fixa ao redor da barrinha recolhida e continua click-through; o retângulo nativo da superfície expandida acompanha a animação sem ampliar essa margem. Os sliders de tamanho atualizam a geometria publicada sem reposicionar a janela em cada movimento. O seletor de monitor permite somente uma tela, converte preferências antigas de todos os monitores para a principal e não cria janelas `display-*`. A vista Pet usa a mesma altura da Home e Atalhos usa linhas de altura determinada pelo conteúdo.
+
+77. Em `2026-10-08-edge-ghosty-curvatura-coucou-windows`, as curvas da ilha usam `border-radius` no próprio corpo preto, seguindo o CSS do port Windows do Coucou. O corpo é arredondado em 14 px recolhido e 22 px expandido; o `overflow: hidden` do corpo recorta o conteúdo. Os pseudo-elementos com gradientes radiais e o offset JavaScript das orelhas foram removidos.
+
+78. Em `2026-10-08-edge-ghosty-updater-tauri-github`, o app principal verifica atualizações assinadas ao iniciar e a cada seis horas; Configurações mostra disponibilidade, estado de download e comandos para verificar ou instalar/reiniciar. O plugin Tauri Updater baixa `latest.json` de `gusata/Ghosty` e gera artefatos NSIS assinados; depois do download, o plugin Process reinicia o app. A chave pública fica em `src-tauri/tauri.conf.json`; a chave privada fica fora do repositório e é injetada no workflow pelo segredo Actions `TAURI_SIGNING_PRIVATE_KEY`. Nunca versionar a chave privada. Após a correção do item 79, a versão 1.0.4 é a primeira que inclui o verificador.
+
+79. Após a publicação de `v1.0.3`, foi confirmado que o commit `f6cf588` não inclui o updater. A implementação local do updater foi alinhada para `1.0.4` em `package.json`, `src-tauri/Cargo.toml` e `src-tauri/tauri.conf.json`. Usuários da 1.0.3 precisarão instalar a 1.0.4 manualmente uma vez; releases posteriores poderão chegar pelo updater.
+
+80. Em `2026-10-08-edge-ghosty-configuracoes-introducao-pet`, Configurações é uma janela normal, separada e visível na barra de tarefas, com abas Geral e Atalhos; a ilha mantém somente Início e Pet. O assistente da primeira execução apresenta o Ghosty com saudação, animação, partículas e escolha entre abrir ao passar o cursor ou clicar. Configurações permite informar valores numéricos para comprimento/espessura e ajustar a posição de 0 a 100% ao longo da borda; o host e a ilha mantêm a posição dentro do monitor. Atalhos destaca os destinos que o chat rápido pode abrir. A tela Pet aumentou e centralizou o personagem como elemento principal.
+81. Em `2026-10-08-edge-ghosty-abertura-geometria-animada`, a posição da ilha acompanha largura e altura em cada quadro de abertura/recolhimento. `setBodyPosition` ancora o corpo pela porcentagem configurada usando a geometria interpolada, evitando que os seletores CSS de expandido saltem imediatamente para a posição final. Ao receber preferências de outra janela, reposicionar a geometria atual antes de animar o novo alvo. O CSS não deve calcular a âncora usando apenas o tamanho final expandido.
+82. Em `2026-10-09-edge-ghosty-updater-versao-tag`, o release público `v1.0.7` foi gerado com app e `latest.json` em `1.0.4`; o plugin Tauri compara SemVer e não oferece essa mesma versão como atualização. O próximo alvo é `1.0.8`. Antes de compilar release, `.github/workflows/release-windows.yml` confere se a tag coincide com `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock` e `tauri.conf.json`; não publicar releases com metadados divergentes. O updater verifica ao iniciar e a cada seis horas, mas a instalação continua explícita em Configurações.
+83. Em `2026-10-09-edge-ghosty-v1-0-8-publicado`, a tag `v1.0.8` foi enviada no commit `5e013eb` e o release Windows foi compilado, assinado e publicado. `latest.json` e os manifestos anunciam `1.0.8`; os assets são `Edge.Ghosty_1.0.8_x64-setup.exe`, `.sig` e `latest.json`. O workflow concluiu com sucesso em `37924956537`. Instalações 1.0.4 ou posteriores verificam ao iniciar e a cada seis horas; a instalação é iniciada em Configurações → Atualizações. Versões anteriores à 1.0.4 ainda precisam instalar uma versão com updater manualmente.
+
+
+84. Em `2026-10-09-edge-ghosty-coucou-intro-implementada`, uma instalacao com onboarding pendente abre a ilha no topo central e toca uma saudacao de 4,6 s adaptada do Coucou: entrada, riscos e anel de pontos, quique, deslocamento, aceno, badge, retorno e transicao de halo/tinta. Ao terminar, a ilha expande para a configuracao inicial existente. A borda e posicao iniciais sao topo e centro; preferencias persistidas apos o onboarding continuam valendo. Coreografia e efeitos sao adaptados sob MIT, mas o desenho do Ghosty permanece proprio. Movimento reduzido pula a introducao.
+
+85. Em `2026-10-13-edge-ghosty-paineis-google`, o popup Painéis reúne Agora, Gmail, Agenda, Tarefas, Notificações e Clima. Google usa OAuth 2.0 Desktop com PKCE e loopback `127.0.0.1`; o Client ID público é configurado pelo usuário, tokens ficam no Windows Credential Manager e o snapshot fica em memória. Gmail lê somente cabeçalhos de mensagens não lidas e oferece abrir, marcar como lida e arquivar; Agenda usa escopo somente leitura; Tarefas permite listar, criar e concluir. O login depende de Client ID e APIs configurados no Google Cloud e do consentimento da conta. Os avisos resumidos ficam localmente, limitados a 50; não enviar conteúdo do Gmail ao chat. Open-Meteo usa somente cidade escolhida manualmente. Atualizações Google e clima respeitam a pausa da bandeja. O Ghosty reage a conexão, e-mails novos, compromissos próximos, tarefas e falhas por eventos reais.
+
+86. Em `2026-10-13-edge-ghosty-paineis-na-barra`, Agora, E-mail, Agenda, Tarefas, Avisos e Clima ficam em subabas dentro da aba Painéis da própria ilha. A navegação superior da barra tem Início, Pet e Painéis; o atalho da Home e o botão nas configurações levam à aba Painéis em vez de abrir o popup. A ilha anima para 960×380 logical px nas bordas horizontais ou 420×620 na vertical, limitada ao host; o conteúdo das subabas rola dentro da ilha. Popups utilitários continuam separados para Foco, Bolso, personalização, prancheta e chat.
+
+87. Em `2026-10-13-edge-ghosty-google-oauth-client-do-app`, o publicador registra um único cliente OAuth Google para aplicativo de computador. O usuário final não informa Client ID nem abre o Google Cloud: clica em Conectar Google e concede os escopos no navegador. `src-tauri/build.rs` injeta `EDGE_GHOSTY_GOOGLE_CLIENT_ID` no binário; builds release falham se a variável estiver ausente ou inválida. `.github/workflows/release-windows.yml` lê a variável de Actions com o mesmo nome. O OAuth PKCE, loopback e armazenamento de tokens no Gerenciador de Credenciais permanecem. A tela de consentimento e a verificação dos escopos Google continuam responsabilidade do publicador; `gmail.modify` é restrito.
+
+88. Em `2026-10-13-edge-ghosty-google-oauth-client-secret`, o OAuth Google continua usando credencial **Desktop app** e PKCE. O Client Secret é opcional para o fluxo nativo; `src-tauri/build.rs` também injeta `EDGE_GHOSTY_GOOGLE_CLIENT_SECRET` quando configurado, e a troca do authorization code e a renovação de tokens o enviam ao Google. Configure-o apenas com o segredo da credencial Desktop se o endpoint retornar `client_secret is missing`; nunca use segredo de cliente Web em um app desktop. O workflow de release lê o valor como GitHub Actions Secret.
+
+89. Em `2026-10-13-edge-ghosty-release-v1-0-10-version-fix`, os metadados do app foram alinhados a `1.0.10` para corrigir a falha do workflow que comparava a tag `v1.0.10` com manifests em `1.0.9`. A tag existente aponta para o commit anterior ao bump na branch `feat/email`; depois de integrar o bump em `main`, mover a tag para o commit integrado e enviar a atualização para disparar novamente o workflow.

@@ -195,6 +195,13 @@ export class PetMotionEngine {
   private readonly reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   private readonly resizeObserver: ResizeObserver;
   private frame = 0;
+  /** False while the canvas is clipped away (e.g. island collapsed); no frames are drawn then. */
+  private onScreen = true;
+  private readonly visibilityObserver: IntersectionObserver;
+  private readonly appearanceObserver: MutationObserver;
+  /** Wakes the sleeping loop for the next blink (see sleepUntilNextBeat). */
+  private wakeTimer: number | undefined;
+  private gazeSettled = false;
   private previousFrame = 0;
   private nextBlinkAt = performance.now() + 1500 + Math.random() * 2000;
   private blinkStartedAt = 0;
@@ -274,8 +281,28 @@ export class PetMotionEngine {
     this.resizeObserver = new ResizeObserver(() => {
       this.resize();
       this.refreshActivityTooltip();
+      // Resizing clears the bitmap, so a sleeping loop must draw again.
+      this.requestFrame();
     });
     this.resizeObserver.observe(root);
+    // Ancestor overflow clipping counts, so a pet inside the collapsed island reads as off-screen.
+    this.visibilityObserver = new IntersectionObserver((entries) => {
+      const visible = entries.some((entry) => entry.isIntersecting);
+      if (visible === this.onScreen) return;
+      this.onScreen = visible;
+      if (!visible) {
+        if (this.frame) cancelAnimationFrame(this.frame);
+        this.frame = 0;
+        this.clearWake();
+        return;
+      }
+      this.previousFrame = 0;
+      this.requestFrame();
+    });
+    this.visibilityObserver.observe(this.canvas);
+    // Skin, accessory and mood are read from data attributes on each frame.
+    this.appearanceObserver = new MutationObserver(() => this.requestFrame());
+    this.appearanceObserver.observe(root, { attributes: true, attributeFilter: ["data-skin", "data-accessory", "data-mood"] });
     document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.reducedMotion.addEventListener("change", this.onMotionPreferenceChange);
     this.resize();
@@ -285,9 +312,13 @@ export class PetMotionEngine {
   setAppearance(skin: Skin, accessory: Accessory, mood: string) {
     this.skin = skin;
     this.accessory = accessory;
+    this.applyMood(mood);
+    this.requestFrame();
+  }
+
+  private applyMood(mood: string) {
     if (mood === "focused") this.setState("working");
     else if (this.activity === "working") this.setState("idle");
-    this.requestFrame();
   }
 
   lookAt(x: number, y: number) {
@@ -639,6 +670,7 @@ export class PetMotionEngine {
     this.emote = "annoyed";
     this.emoteStartedAt = performance.now();
     this.emoteUntil = this.emoteStartedAt + 800;
+    this.requestFrame();
   }
 
   squash() {
@@ -843,10 +875,13 @@ export class PetMotionEngine {
   dispose() {
     this.disposed = true;
     if (this.frame) cancelAnimationFrame(this.frame);
+    this.clearWake();
+    this.appearanceObserver.disconnect();
     if (this.activityTooltipTimer !== undefined) window.clearTimeout(this.activityTooltipTimer);
     this.root.removeEventListener("pointermove", this.onPointerMove);
     this.root.removeEventListener("pointerleave", this.onPointerLeave);
     this.resizeObserver.disconnect();
+    this.visibilityObserver.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     this.reducedMotion.removeEventListener("change", this.onMotionPreferenceChange);
   }
@@ -855,6 +890,7 @@ export class PetMotionEngine {
     if (document.hidden) {
       if (this.frame) cancelAnimationFrame(this.frame);
       this.frame = 0;
+      this.clearWake();
       return;
     }
     this.previousFrame = 0;
@@ -907,12 +943,13 @@ export class PetMotionEngine {
     const accessory = this.root.dataset.accessory;
     this.skin = skin === "smoke" || skin === "midnight" || skin === "mint" || skin === "coral" || skin === "lavender" ? skin : "pearl";
     this.accessory = accessory === "star" || accessory === "bow" || accessory === "halo" || accessory === "leaf" || accessory === "crown" ? accessory : "none";
-    this.setAppearance(this.skin, this.accessory, this.root.dataset.mood ?? "calm");
+    // Runs every frame: no frame request here, or the loop could never rest.
+    this.applyMood(this.root.dataset.mood ?? "calm");
   }
 
   private resize() {
     const rect = this.canvas.getBoundingClientRect();
-    const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
+    const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2);
     const width = Math.max(1, Math.round(rect.width * pixelRatio));
     const height = Math.max(1, Math.round(rect.height * pixelRatio));
     if (this.canvas.width !== width || this.canvas.height !== height) {
@@ -922,8 +959,56 @@ export class PetMotionEngine {
   }
 
   private requestFrame() {
-    if (this.disposed || this.frame || document.hidden) return;
+    if (this.disposed || this.frame || document.hidden || !this.onScreen) return;
+    this.clearWake();
     this.frame = requestAnimationFrame(this.renderFrame);
+  }
+
+  private clearWake() {
+    if (this.wakeTimer === undefined) return;
+    window.clearTimeout(this.wakeTimer);
+    this.wakeTimer = undefined;
+  }
+
+  /**
+   * Nothing moves until the next blink: the loop stops drawing and a timer wakes it
+   * then. Every public animation entry point requests a frame, so it restarts at once.
+   * Adapted from Coucou's island loop, which stops when nothing is animating.
+   */
+  private sleepUntilNextBeat(now: number) {
+    this.clearWake();
+    const wakeAt = Math.min(this.nextBlinkAt, this.doubleBlinkAt > 0 ? this.doubleBlinkAt : Number.POSITIVE_INFINITY);
+    this.wakeTimer = window.setTimeout(() => {
+      this.wakeTimer = undefined;
+      this.previousFrame = 0;
+      this.requestFrame();
+    }, Math.max(16, wakeAt - now));
+  }
+
+  /** True when the next frame would draw exactly what is already on the canvas. */
+  private isAtRest(now: number) {
+    const reduced = this.reducedMotion.matches;
+    const staticActivity = this.activity === "idle"
+      || (reduced && this.activity !== "dizzy" && this.activity !== "finished" && this.activity !== "sleeping" && this.activity !== "ratelimit");
+    if (!staticActivity) return false;
+    if (this.pending.length || this.pendingBadge || this.particleBursts.length || this.particles.length) return false;
+    for (const channel of CHANNELS) {
+      const track = this.tracks[channel];
+      if (track.duration > 0 && now < track.startsAt + track.duration) return false;
+    }
+    if (this.emote || this.greetingStartedAt || this.shortGreetingStartedAt || this.greetingExit || this.waveUntil > 0) return false;
+    if (this.ingestStartedAt || this.receivingFile || this.fileReturnActive) return false;
+    if (!reduced && (this.badge === "dots" || this.accessory === "star")) return false;
+    if (this.blinkStartedAt && now - this.blinkStartedAt < 220) return false;
+    if (this.sparkStartedAt && now - this.sparkStartedAt < 1400) return false;
+    if (this.heartStartedAt && now - this.heartStartedAt < 1000) return false;
+    if (this.eyeShapeTransitionAt && now - this.eyeShapeTransitionAt < 140) return false;
+    if (Math.abs(this.approvalBounce) > 0.01 || Math.abs(this.shortGreetingTilt) > 0.001 || Math.abs(this.fileHop) > 0.01) return false;
+    if (!this.gazeSettled) return false;
+    for (let index = 0; index < 3; index += 1) {
+      if (Math.abs(this.targetStateColor[index] - this.stateColor[index]) > 0.5) return false;
+    }
+    return true;
   }
 
   private readonly renderFrame = (timestamp: number) => {
@@ -939,7 +1024,8 @@ export class PetMotionEngine {
     this.advance(now, delta);
     this.updateActivityMarkerHover();
     this.draw(now);
-    this.requestFrame();
+    if (this.isAtRest(now)) this.sleepUntilNextBeat(now);
+    else this.requestFrame();
   };
 
   private play(steps: MotionStep[], priority: number) {
@@ -958,6 +1044,7 @@ export class PetMotionEngine {
       this.pending.push({ ...step, startsAt: startsAt + step.at, priority, version });
     }
     this.pending.sort((a, b) => a.startsAt - b.startsAt);
+    this.requestFrame();
   }
 
   private snap(channel: Channel, value: number) {
@@ -1066,6 +1153,7 @@ export class PetMotionEngine {
     const follow = this.reducedMotion.matches ? 1 : 1 - Math.pow(0.0025, delta);
     this.gazeX += (targetX - this.gazeX) * follow;
     this.gazeY += (targetY - this.gazeY) * follow;
+    this.gazeSettled = Math.abs(targetX - this.gazeX) < 0.002 && Math.abs(targetY - this.gazeY) < 0.002;
     if (this.doubleBlinkAt > 0 && now >= this.doubleBlinkAt) {
       if (!this.reducedMotion.matches && this.activity !== "sleeping" && this.activity !== "dizzy") {
         this.blinkStartedAt = now;

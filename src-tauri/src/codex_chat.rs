@@ -360,7 +360,7 @@ fn refresh_catalog(session: &mut ChatSession) -> ChatCatalog {
     ChatCatalog { authenticated: session.authenticated, models: session.models.clone() }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_start(app: AppHandle, state: State<'_, CodexChatState>) -> Result<ChatCatalog, String> {
     ensure_session(&app, &state)?;
     let mut slot = state.session.lock().map_err(|_| "estado do chat indisponível".to_string())?;
@@ -368,14 +368,14 @@ pub fn quick_chat_start(app: AppHandle, state: State<'_, CodexChatState>) -> Res
     Ok(refresh_catalog(session))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_status(state: State<'_, CodexChatState>) -> Result<ChatCatalog, String> {
     let mut slot = state.session.lock().map_err(|_| "estado do chat indisponível".to_string())?;
     let session = slot.as_mut().ok_or_else(|| "sessão do Codex não está ativa".to_string())?;
     Ok(refresh_catalog(session))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_login(state: State<'_, CodexChatState>) -> Result<LoginInfo, String> {
     let mut slot = state.session.lock().map_err(|_| "estado do chat indisponível".to_string())?;
     let session = slot.as_mut().ok_or_else(|| "sessão do Codex não está ativa".to_string())?;
@@ -386,7 +386,7 @@ pub fn quick_chat_login(state: State<'_, CodexChatState>) -> Result<LoginInfo, S
     Ok(LoginInfo { auth_url })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_send(
     app: AppHandle,
     state: State<'_, CodexChatState>,
@@ -454,7 +454,7 @@ fn parse_site_resolution(output: &str) -> Option<String> {
     Some(candidate.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_resolve_website(
     app: AppHandle,
     state: State<'_, CodexChatState>,
@@ -562,7 +562,7 @@ pub fn quick_chat_resolve_website(
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_cancel(state: State<'_, CodexChatState>) -> Result<(), String> {
     let mut slot = state.session.lock().map_err(|_| "estado do chat indisponível".to_string())?;
     let session = slot.as_mut().ok_or_else(|| "sessão do Codex não está ativa".to_string())?;
@@ -573,7 +573,7 @@ pub fn quick_chat_cancel(state: State<'_, CodexChatState>) -> Result<(), String>
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_respond(
     state: State<'_, CodexChatState>,
     request_id: Value,
@@ -594,7 +594,7 @@ pub fn quick_chat_respond(
     session.rpc.respond(request_id, result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn quick_chat_close(state: State<'_, CodexChatState>) -> Result<(), String> {
     let mut slot = state.session.lock().map_err(|_| "estado do chat indisponível".to_string())?;
     if let Some(mut session) = slot.take() {
